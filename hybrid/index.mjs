@@ -38,13 +38,33 @@ function responsePreview(response) {
 
 function looksLikeTransportFailure(response, method) {
   const status = Number(response?.status || 0);
-  if (status >= 502 && status <= 599) return true;
-  if (status !== 500) return false;
-  // A real upstream 500 should remain visible. Treat only generic proxy/
-  // transport failures as a reason to retry the request over the bridge.
-  const preview = responsePreview(response).toLowerCase();
-  return /failed to fetch|network error|request failed|transport|service unavailable|bad gateway/.test(preview)
-    && /^(GET|HEAD|OPTIONS)$/i.test(String(method || 'GET'));
+  // GET/HEAD/OPTIONS are safe to replay. A transport proxy can turn an
+  // otherwise healthy asset into a generic 500, so do not require a specific
+  // error-body string before trying the alternate path. If the alternate
+  // path returns the same real upstream 500, that response is still returned.
+  return status >= 500 && status <= 599 && /^(GET|HEAD|OPTIONS)$/i.test(String(method || 'GET'));
+}
+
+function isSafeReplayMethod(method) {
+  return /^(GET|HEAD|OPTIONS)$/i.test(String(method || 'GET'));
+}
+
+async function nativeHttpRequest(remote, method, headers, signal) {
+  const response = await fetch(remote.href, {
+    method,
+    headers,
+    redirect: 'manual',
+    signal,
+  });
+  const bytes = method === 'HEAD' || [204, 205, 304].includes(response.status)
+    ? new Uint8Array()
+    : new Uint8Array(await response.arrayBuffer());
+  return {
+    body: bytes.buffer,
+    headers: Object.fromEntries(response.headers.entries()),
+    status: response.status,
+    statusText: response.statusText,
+  };
 }
 
 function hybridLog(message, details) {
@@ -62,6 +82,8 @@ export default class HybridTransport {
     this.websocket = this.bridge;
     this.ready = false;
     this.wispUnavailable = false;
+    this.bridgeUnavailable = false;
+    this.bridgeTimeoutMs = 5000;
     hybridLog('constructed', {
       httpTransport: 'Wisp',
       websocketTransport: 'HTTP bridge',
@@ -90,17 +112,64 @@ export default class HybridTransport {
     hybridLog('meta.complete');
   }
 
-  request(remote, method, body, headers, signal) {
+  async request(remote, method, body, headers, signal) {
     const requestId = `http-${++hybridRequestSequence}`;
     hybridLog('request.start', { requestId, method, url: endpoint(remote.href) });
-    if (this.wispUnavailable) {
-      hybridLog('request.httpbridge.direct', { requestId, reason: 'Wisp previously failed' });
-      return this.bridge.request(remote, method, body, headers, signal).then((response) => {
+
+    const nativeFallback = async (reason) => {
+      if (!isSafeReplayMethod(method)) {
+        throw new Error(`Safe HTTP fallback is unavailable for ${method || 'GET'} requests`);
+      }
+      hybridWarn('request.native-http.start', { requestId, reason, url: endpoint(remote.href) });
+      const response = await nativeHttpRequest(remote, method, headers, signal);
+      hybridLog('request.native-http.complete', { requestId, status: response.status });
+      return response;
+    };
+
+    const bridgeRequest = async (reason) => {
+      if (this.bridgeUnavailable) {
+        return nativeFallback('HTTP bridge previously failed: ' + reason);
+      }
+      const controller = new AbortController();
+      const abortBridge = () => controller.abort();
+      let timeoutId;
+      if (signal) {
+        if (signal.aborted) controller.abort();
+        else signal.addEventListener('abort', abortBridge, { once: true });
+      }
+      timeoutId = setTimeout(() => controller.abort(), this.bridgeTimeoutMs);
+      try {
+        hybridLog('request.httpbridge.start', { requestId, reason, url: endpoint(remote.href) });
+        const response = await this.bridge.request(remote, method, body, headers, controller.signal);
         hybridLog('request.httpbridge.complete', { requestId, status: response.status });
         return response;
-      });
+      } finally {
+        clearTimeout(timeoutId);
+        if (signal) signal.removeEventListener('abort', abortBridge);
+      }
+    };
+
+    const alternateRequest = async (reason) => {
+      try {
+        const response = await bridgeRequest(reason);
+        if (looksLikeTransportFailure(response, method)) {
+          this.bridgeUnavailable = true;
+          return nativeFallback('HTTP bridge returned ' + response.status);
+        }
+        return response;
+      } catch (error) {
+        this.bridgeUnavailable = true;
+        hybridWarn('request.httpbridge.failed', { requestId, error: errorDetails(error) });
+        return nativeFallback('HTTP bridge failed');
+      }
+    };
+
+    if (this.wispUnavailable) {
+      return alternateRequest('Wisp previously failed');
     }
-    return this.http.request(remote, method, body, headers, signal).then((response) => {
+
+    try {
+      const response = await this.http.request(remote, method, body, headers, signal);
       if (looksLikeTransportFailure(response, method)) {
         this.wispUnavailable = true;
         hybridWarn('request.wisp returned transport-like failure; switching session to HTTP bridge', {
@@ -108,21 +177,15 @@ export default class HybridTransport {
           status: response.status,
           preview: responsePreview(response).slice(0, 160),
         });
-        return this.bridge.request(remote, method, body, headers, signal).then((bridgeResponse) => {
-          hybridLog('request.httpbridge.complete', { requestId, status: bridgeResponse.status, afterWispStatus: response.status });
-          return bridgeResponse;
-        });
+        return alternateRequest('Wisp returned ' + response.status);
       }
       hybridLog('request.wisp.complete', { requestId, status: response.status });
       return response;
-    }).catch((error) => {
+    } catch (error) {
       this.wispUnavailable = true;
       hybridWarn('request.wisp.failed; using HTTP bridge fallback', { requestId, error: errorDetails(error) });
-      return this.bridge.request(remote, method, body, headers, signal).then((response) => {
-        hybridLog('request.httpbridge.complete', { requestId, status: response.status });
-        return response;
-      });
-    });
+      return alternateRequest('Wisp request failed');
+    }
   }
 
   connect(url, protocols, requestHeaders, onopen, onmessage, onclose, onerror) {
