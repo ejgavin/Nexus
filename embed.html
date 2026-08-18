@@ -763,7 +763,10 @@
     log('ensureReady() starting SW registration');
     readyPromise = (async function () {
       // Register SW first and wait for it to be active
-      var reg = await navigator.serviceWorker.register('/1k123.js?build=math-v1', {
+      // Change this identifier whenever transport code changes. Service
+      // workers can otherwise keep an older 1k123.js alive after a Netlify
+      // deployment, making the browser appear to ignore the HTTP bridge.
+      var reg = await navigator.serviceWorker.register('/1k123.js?build=math-v2', {
         updateViaCache: 'none',
         scope: '/',
       });
