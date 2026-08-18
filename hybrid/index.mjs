@@ -38,33 +38,15 @@ function responsePreview(response) {
 
 function looksLikeTransportFailure(response, method) {
   const status = Number(response?.status || 0);
+  // Epoxy/Wisp can surface a network failure as a response-shaped object with
+  // status 0. Passing that through makes Scramjet construct an invalid native
+  // Response and produces a misleading status-range exception.
+  if (status < 200 || status > 599) return true;
   // GET/HEAD/OPTIONS are safe to replay. A transport proxy can turn an
   // otherwise healthy asset into a generic 500, so do not require a specific
   // error-body string before trying the alternate path. If the alternate
   // path returns the same real upstream 500, that response is still returned.
   return status >= 500 && status <= 599 && /^(GET|HEAD|OPTIONS)$/i.test(String(method || 'GET'));
-}
-
-function isSafeReplayMethod(method) {
-  return /^(GET|HEAD|OPTIONS)$/i.test(String(method || 'GET'));
-}
-
-async function nativeHttpRequest(remote, method, headers, signal) {
-  const response = await fetch(remote.href, {
-    method,
-    headers,
-    redirect: 'manual',
-    signal,
-  });
-  const bytes = method === 'HEAD' || [204, 205, 304].includes(response.status)
-    ? new Uint8Array()
-    : new Uint8Array(await response.arrayBuffer());
-  return {
-    body: bytes.buffer,
-    headers: Object.fromEntries(response.headers.entries()),
-    status: response.status,
-    statusText: response.statusText,
-  };
 }
 
 function hybridLog(message, details) {
@@ -82,7 +64,6 @@ export default class HybridTransport {
     this.websocket = this.bridge;
     this.ready = false;
     this.wispUnavailable = false;
-    this.bridgeUnavailable = false;
     this.bridgeTimeoutMs = 5000;
     hybridLog('constructed', {
       httpTransport: 'Wisp',
@@ -116,20 +97,7 @@ export default class HybridTransport {
     const requestId = `http-${++hybridRequestSequence}`;
     hybridLog('request.start', { requestId, method, url: endpoint(remote.href) });
 
-    const nativeFallback = async (reason) => {
-      if (!isSafeReplayMethod(method)) {
-        throw new Error(`Safe HTTP fallback is unavailable for ${method || 'GET'} requests`);
-      }
-      hybridWarn('request.native-http.start', { requestId, reason, url: endpoint(remote.href) });
-      const response = await nativeHttpRequest(remote, method, headers, signal);
-      hybridLog('request.native-http.complete', { requestId, status: response.status });
-      return response;
-    };
-
     const bridgeRequest = async (reason) => {
-      if (this.bridgeUnavailable) {
-        return nativeFallback('HTTP bridge previously failed: ' + reason);
-      }
       const controller = new AbortController();
       const abortBridge = () => controller.abort();
       let timeoutId;
@@ -151,16 +119,10 @@ export default class HybridTransport {
 
     const alternateRequest = async (reason) => {
       try {
-        const response = await bridgeRequest(reason);
-        if (looksLikeTransportFailure(response, method)) {
-          this.bridgeUnavailable = true;
-          return nativeFallback('HTTP bridge returned ' + response.status);
-        }
-        return response;
+        return await bridgeRequest(reason);
       } catch (error) {
-        this.bridgeUnavailable = true;
         hybridWarn('request.httpbridge.failed', { requestId, error: errorDetails(error) });
-        return nativeFallback('HTTP bridge failed');
+        throw error;
       }
     };
 
