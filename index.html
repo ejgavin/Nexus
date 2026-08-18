@@ -6,6 +6,29 @@
   <title>IXL</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23006fba'/%3E%3Ctext x='32' y='42' text-anchor='middle' font-family='Arial,sans-serif' font-size='28' font-weight='700' fill='white'%3EIXL%3C/text%3E%3C/svg%3E"/>
   <script src="/config.js"></script>
+  <script>
+    // Migrate away from an older root-scoped Nexus worker automatically.
+    // This prevents an old math-v1 worker from continuing to control the
+    // page after a Netlify deployment has published math-v2.
+    window.__nexusSwMigration = (async function () {
+      try {
+        var marker = 'nexus-sw-migration-math-v3';
+        if (sessionStorage.getItem(marker) === '1') return;
+        var registrations = await navigator.serviceWorker.getRegistrations();
+        var stale = registrations.filter(function (registration) {
+          var worker = registration.active || registration.waiting || registration.installing;
+          return worker && /\/1k123\.js(?:\?|$)/.test(worker.scriptURL) && !/build=math-v3(?:&|$)/.test(worker.scriptURL);
+        });
+        if (!stale.length) return;
+        sessionStorage.setItem(marker, '1');
+        await Promise.all(stale.map(function (registration) { return registration.unregister(); }));
+        location.reload();
+        await new Promise(function () {});
+      } catch (error) {
+        console.warn('[Nexus] service-worker migration skipped', error);
+      }
+    })();
+  </script>
   <!-- Keep a root-page bare-mux channel alive. The service worker can ask
        any controlled window for this port before embed.html has loaded. -->
   <script src="/m4thx/index.js"></script>
@@ -22,7 +45,9 @@
           localStorage.getItem('nexus-httpbridge-ws-setting') === '1'));
       var rootTransport = rootWsOnly ? '/hybrid/index.mjs' : (rootHttpBridge ? '/httpbridge/index.mjs' : '/m4thx/index.mjs');
       var rootArgs = rootWsOnly ? [_CONFIG.wispurl, _CONFIG.bridgeurl] : (rootHttpBridge ? [_CONFIG.bridgeurl] : [_CONFIG.bareurl]);
-      window.__nexusMuxTransportReady = window.__nexusMuxHandshake.setTransport(rootTransport, rootArgs)
+      window.__nexusMuxTransportReady = Promise.resolve(window.__nexusSwMigration).then(function () {
+        return window.__nexusMuxHandshake.setTransport(rootTransport, rootArgs);
+      })
         .then(function () {
           console.log('%c[Nexus:parent]', 'color:#3b7ef6;font-weight:700', 'bare-mux responder ready', {
             transport: rootWsOnly ? 'hybrid' : (rootHttpBridge ? 'http bridge' : 'bare HTTP'),
