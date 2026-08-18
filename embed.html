@@ -13,12 +13,12 @@
     // landing page. The session marker prevents a reload loop.
     window.__nexusSwMigration = (async function () {
       try {
-        var marker = 'nexus-sw-migration-math-v4';
+        var marker = 'nexus-sw-migration-math-v5-wsdiag';
         if (sessionStorage.getItem(marker) === '1') return;
         var registrations = await navigator.serviceWorker.getRegistrations();
         var stale = registrations.filter(function (registration) {
           var worker = registration.active || registration.waiting || registration.installing;
-          return worker && /\/1k123\.js(?:\?|$)/.test(worker.scriptURL) && !/build=math-v4(?:&|$)/.test(worker.scriptURL);
+          return worker && /\/1k123\.js(?:\?|$)/.test(worker.scriptURL) && !/build=math-v5-wsdiag(?:&|$)/.test(worker.scriptURL);
         });
         if (!stale.length) return;
         sessionStorage.setItem(marker, '1');
@@ -413,6 +413,17 @@
   // loadAndHook(JSON.stringify(config)) bootstrap — making it readable from
   // inside the proxied page's own runtime, which is what the patched
   // window.open hook (in sj.all.js) checks against for popup blocking.
+  // Google and a few other large sites intentionally retry CSS registration
+  // during startup. Scramjet's captureErrors hook turns that site-side
+  // exception into a repeated "CAUGHT ERROR" console warning, even when the
+  // page continues normally. Keep that noisy hook off for normal browsing;
+  // append ?scramjeterrors=1 when debugging a site's rewritten exceptions.
+  var scramjetErrorCapture = false;
+  try {
+    scramjetErrorCapture = new URLSearchParams(location.search).get('scramjeterrors') === '1' ||
+      localStorage.getItem('nexus-scramjet-errors') === '1';
+  } catch (_) {}
+
   var SJ_CONFIG = {
     prefix: '/math/',
     files: {
@@ -425,6 +436,8 @@
     // code is reached, so use the compatibility rewrite mode here.
     flags: {
       strictRewrites: false,
+      captureErrors: scramjetErrorCapture,
+      cleanErrors: !scramjetErrorCapture,
       allowInvalidJs: true,
       allowFailedIntercepts: true,
     },
@@ -503,6 +516,13 @@
   if (socksEnabled) store.bareurl += (store.bareurl.indexOf('?') >= 0 ? '&' : '?') + 'socks=1';
   var bridgeTransportModule = location.origin + '/httpbridge/index.mjs';
   var hybridTransportModule = location.origin + '/hybrid/index.mjs';
+  log('transport mode resolved', {
+    httpBridge: useHttpBridge,
+    httpBridgeWebSocketsOnly: useHttpBridgeWsOnly,
+    query: location.search,
+    controller: navigator.serviceWorker.controller ? navigator.serviceWorker.controller.scriptURL : null,
+    bridge: store.bridgeurl,
+  });
   log('transport endpoints resolved', store);
 
   var readyPromise = null;
@@ -750,21 +770,33 @@
   function waitForConfigAck(timeoutMs) {
     return new Promise(function (resolve) {
       var settled = false;
+      log('config ack listener installing', {
+        timeoutMs: timeoutMs,
+        controller: navigator.serviceWorker.controller ? navigator.serviceWorker.controller.scriptURL : null,
+        state: navigator.serviceWorker.controller ? 'controlled' : 'not-controlled',
+      });
       function onMsg(e) {
         if (e.data && e.data.nexus$type === 'configAck') {
           if (settled) return;
           settled = true;
           navigator.serviceWorker.removeEventListener('message', onMsg);
-          log('SW acked config', e.data);
+          log('SW acked config', {
+            ready: !!e.data.ready,
+            source: e.source && e.source.id ? e.source.id : null,
+            controller: navigator.serviceWorker.controller ? navigator.serviceWorker.controller.scriptURL : null,
+          });
           resolve(!!e.data.ready);
         }
       }
       navigator.serviceWorker.addEventListener('message', onMsg);
+      log('config ack listener installed');
       setTimeout(function () {
         if (settled) return;
         settled = true;
         navigator.serviceWorker.removeEventListener('message', onMsg);
-        warn('SW config ack timed out after ' + timeoutMs + 'ms');
+        warn('SW config ack timed out after ' + timeoutMs + 'ms', {
+          controller: navigator.serviceWorker.controller ? navigator.serviceWorker.controller.scriptURL : null,
+        });
         resolve(false);
       }, timeoutMs);
     });
@@ -774,6 +806,7 @@
     await window.__nexusIdbReady;
     log('sendConfigAndWait() -> engine.init()');
     await engine.init();
+    log('engine.init() returned; waiting for SW config acknowledgment');
     var ok = await waitForConfigAck(10000);
     if (!ok) {
       warn('config ack failed, retrying engine.init() once');
@@ -793,7 +826,7 @@
       // Change this identifier whenever transport code changes. Service
       // workers can otherwise keep an older 1k123.js alive after a Netlify
       // deployment, making the browser appear to ignore the HTTP bridge.
-      var reg = await navigator.serviceWorker.register('/1k123.js?build=math-v4', {
+      var reg = await navigator.serviceWorker.register('/1k123.js?build=math-v5-wsdiag', {
         updateViaCache: 'none',
         scope: '/',
       });

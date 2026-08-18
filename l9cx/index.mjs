@@ -7213,6 +7213,29 @@ Several C libraries are used, and their licenses are listed below:
 })();
 
 // src/main.ts
+let libcurlSocketSequence = 0;
+
+function libcurlUrl(value) {
+  try {
+    const url = new URL(value);
+    return `${url.protocol}//${url.host}${url.pathname}`;
+  } catch (_) {
+    return String(value || '').slice(0, 240);
+  }
+}
+
+function libcurlError(error) {
+  return { name: error?.name || 'Error', message: error?.message || String(error) };
+}
+
+function libcurlLog(message, details) {
+  console.log('%c[Nexus:libcurl]', 'color:#c084fc;font-weight:700', new Date().toISOString(), message, details || '');
+}
+
+function libcurlWarn(message, details) {
+  console.warn('%c[Nexus:libcurl]', 'color:#f97316;font-weight:700', new Date().toISOString(), message, details || '');
+}
+
 var LibcurlClient = class {
   wisp;
   proxy;
@@ -7238,6 +7261,7 @@ var LibcurlClient = class {
     }
   }
   async init() {
+    libcurlLog('init.start', { endpoint: libcurlUrl(this.wisp) });
     if (this.transport) libcurl.transport = this.transport;
     libcurl.set_websocket(this.wisp);
     this.session = new libcurl.HTTPSession({
@@ -7253,6 +7277,7 @@ var LibcurlClient = class {
       libcurl.onload = () => {
         console.log('loaded libcurl.js v' + libcurl.version.lib);
         this.ready = true;
+        libcurlLog('init.complete', { endpoint: libcurlUrl(this.wisp), version: libcurl.version.lib });
         resolve(null);
       };
     });
@@ -7260,6 +7285,7 @@ var LibcurlClient = class {
   ready = false;
   async meta() {}
   async request(remote, method, body, headers, signal) {
+    libcurlLog('request.start', { method, url: libcurlUrl(remote.href) });
     let payload = await this.session.fetch(remote.href, {
       method,
       headers,
@@ -7275,6 +7301,7 @@ var LibcurlClient = class {
         respheaders[key].push(value);
       }
     }
+    libcurlLog('request.complete', { method, url: libcurlUrl(remote.href), status: payload.status, bodyBytes: payload.body?.byteLength ?? 0 });
     return {
       body: payload.body,
       headers: respheaders,
@@ -7283,27 +7310,40 @@ var LibcurlClient = class {
     };
   }
   connect(url, protocols, requestHeaders, onopen, onmessage, onclose, onerror) {
+    const socketId = `libcurl-ws-${++libcurlSocketSequence}`;
+    libcurlLog('websocket.connect.start', { socketId, url: libcurlUrl(url.href), protocols: protocols || [], browserWebSocketOpened: false, upstream: 'libcurl' });
     let socket = new libcurl.WebSocket(url.toString(), protocols, {
       headers: requestHeaders
     });
     socket.binaryType = 'arraybuffer';
     socket.onopen = (event) => {
+      libcurlLog('websocket.upstream.open', { socketId });
       onopen('');
     };
     socket.onclose = (event) => {
+      libcurlWarn('websocket.upstream.close', { socketId, code: event.code, reason: event.reason || '' });
       onclose(event.code, event.reason);
     };
     socket.onerror = (event) => {
-      onerror('');
+      libcurlWarn('websocket.upstream.error', { socketId, error: libcurlError(event) });
+      onerror(event);
     };
     socket.onmessage = (event) => {
+      libcurlLog('websocket.upstream.message', { socketId, bytes: event.data?.byteLength ?? event.data?.length ?? 0, type: typeof event.data });
       onmessage(event.data);
     };
     return [
       (data) => {
-        socket.send(data);
+        try {
+          libcurlLog('websocket.send', { socketId, bytes: data?.byteLength ?? data?.size ?? data?.length ?? 0, type: typeof data });
+          socket.send(data);
+        } catch (error) {
+          libcurlWarn('websocket.send.failed', { socketId, error: libcurlError(error) });
+          throw error;
+        }
       },
       (code, reason) => {
+        libcurlLog('websocket.close.requested', { socketId, code, reason: reason || '' });
         socket.close(code, reason);
       }
     ];

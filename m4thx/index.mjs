@@ -11,6 +11,24 @@ const e = 20,
     CONNECTING: WebSocket.CONNECTING,
     OPEN: WebSocket.OPEN
   };
+let muxSocketSequence = 0;
+
+function muxUrl(value) {
+  try {
+    const url = new URL(value);
+    return `${url.protocol}//${url.host}${url.pathname}`;
+  } catch (_) {
+    return String(value || '').slice(0, 240);
+  }
+}
+
+function muxLog(message, details) {
+  console.log('%c[Nexus:mux]', 'color:#facc15;font-weight:700', new Date().toISOString(), message, details || '');
+}
+
+function muxWarn(message, details) {
+  console.warn('%c[Nexus:mux]', 'color:#f97316;font-weight:700', new Date().toISOString(), message, details || '');
+}
 async function c() {
   const e = (await self.clients.matchAll({ type: 'window', includeUncontrolled: !0 })).map(async (e) => {
       const t = await (function (e) {
@@ -33,7 +51,10 @@ async function c() {
         console.error('bare-mux: failed to get a bare-mux SharedWorker MessagePort as all clients returned an invalid MessagePort.'),
         new Error('All clients returned an invalid MessagePort.')
       );
-    return (console.warn('bare-mux: failed to get a bare-mux SharedWorker MessagePort within 1s, retrying'), await c());
+    // This is normally a short startup race. Keep it out of the default
+    // warning channel because recursive retries otherwise flood the console.
+    console.debug('[Nexus:mux] SharedWorker port not ready after 1s; retrying');
+    return await c();
   }
 }
 function i(e) {
@@ -116,7 +137,7 @@ class p {
       await i(this.port);
     } catch {
       return (
-        console.warn('bare-mux: Failed to get a ping response from the worker within 1.5s. Assuming port is dead.'),
+        console.debug('[Nexus:mux] worker ping timed out; recreating the port'),
         this.createChannel(),
         await this.sendMessage(e, t)
       );
@@ -134,23 +155,28 @@ class p {
 }
 class w extends EventTarget {
   constructor(e, t = [], r, a) {
-    (super(), (this.protocols = t), (this.readyState = n.CONNECTING), (this.url = e.toString()), (this.protocols = t));
+    (super(), (this.protocols = t), (this.readyState = n.CONNECTING), (this.url = e.toString()), (this.protocols = t), (this.__nexusSocketId = `site-ws-${++muxSocketSequence}`));
+    muxLog('websocket.site.constructed', { socketId: this.__nexusSocketId, url: muxUrl(this.url), protocols: t, readyState: 'CONNECTING' });
     const s = (e) => {
         ((this.protocols = e), (this.readyState = n.OPEN));
+        muxLog('websocket.site.open', { socketId: this.__nexusSocketId, protocol: e || '' });
         const t = new Event('open');
         this.dispatchEvent(t);
       },
       o = async (e) => {
+        muxLog('websocket.site.message', { socketId: this.__nexusSocketId, bytes: e?.byteLength ?? e?.length ?? 0, type: typeof e });
         const t = new MessageEvent('message', { data: e });
         this.dispatchEvent(t);
       },
       c = (e, t) => {
         this.readyState = n.CLOSED;
+        muxWarn('websocket.site.close', { socketId: this.__nexusSocketId, code: e, reason: t || '' });
         const r = new CloseEvent('close', { code: e, reason: t });
         this.dispatchEvent(r);
       },
       i = () => {
         this.readyState = n.CLOSED;
+        muxWarn('websocket.site.error', { socketId: this.__nexusSocketId });
         const e = new Event('error');
         this.dispatchEvent(e);
       };
@@ -164,17 +190,20 @@ class w extends EventTarget {
               ? c(e.data.args[0], e.data.args[1])
               : 'error' === e.data.type && i();
       }),
+      muxLog('websocket.site.route.requested', { socketId: this.__nexusSocketId, url: muxUrl(this.url), transport: 'configured remote transport' }),
       r.sendMessage({ type: 'websocket', websocket: { url: e.toString(), protocols: t, requestHeaders: a, channel: this.channel.port2 } }, [
         this.channel.port2
-      ]));
+      ]).catch((error) => muxWarn('websocket.site.route.request.failed', { socketId: this.__nexusSocketId, message: error?.message || String(error) })));
   }
   send(...e) {
     if (this.readyState === n.CONNECTING) throw new DOMException("Failed to execute 'send' on 'WebSocket': Still in CONNECTING state.");
     let t = e[0];
+    muxLog('websocket.site.send', { socketId: this.__nexusSocketId, bytes: t?.byteLength ?? t?.length ?? 0, type: typeof t });
     (t.buffer && (t = t.buffer.slice(t.byteOffset, t.byteOffset + t.byteLength)),
       o.call(this.channel.port1, { type: 'data', data: t }, t instanceof ArrayBuffer ? [t] : []));
   }
   close(e, t) {
+    muxLog('websocket.site.close.requested', { socketId: this.__nexusSocketId, code: e, reason: t || '' });
     o.call(this.channel.port1, { type: 'close', closeCode: e, closeReason: t });
   }
 }
@@ -232,6 +261,8 @@ class m {
         }
       else if ('websocket' === a.type)
         try {
+          const socketId = a.websocket.channel ? `remote-ws-${++muxSocketSequence}` : 'remote-ws-unknown';
+          muxLog('websocket.remote.request', { socketId, url: muxUrl(a.websocket.url), protocols: a.websocket.protocols || [], transport: e.constructor?.name || 'configured transport' });
           (e.ready || (await e.init()),
             await (async function (e, t, r) {
               const [a, s] = r.connect(
@@ -239,23 +270,30 @@ class m {
                 e.websocket.protocols,
                 e.websocket.requestHeaders,
                 (t) => {
+                  muxLog('websocket.remote.open', { socketId, protocol: t || '' });
                   o.call(e.websocket.channel, { type: 'open', args: [t] });
                 },
                 (t) => {
+                  muxLog('websocket.remote.message', { socketId, bytes: t?.byteLength ?? t?.length ?? 0, type: typeof t });
                   t instanceof ArrayBuffer
                     ? o.call(e.websocket.channel, { type: 'message', args: [t] }, [t])
                     : o.call(e.websocket.channel, { type: 'message', args: [t] });
                 },
                 (t, r) => {
+                  muxWarn('websocket.remote.close', { socketId, code: t, reason: r || '' });
                   o.call(e.websocket.channel, { type: 'close', args: [t, r] });
                 },
                 (t) => {
+                  muxWarn('websocket.remote.error', { socketId, message: t?.message || String(t || '') });
                   o.call(e.websocket.channel, { type: 'error', args: [t] });
                 }
               );
               ((e.websocket.channel.onmessage = (e) => {
-                'data' === e.data.type ? a(e.data.data) : 'close' === e.data.type && s(e.data.closeCode, e.data.closeReason);
+                'data' === e.data.type
+                  ? (muxLog('websocket.remote.send', { socketId, bytes: e.data.data?.byteLength ?? e.data.data?.length ?? 0, type: typeof e.data.data }), a(e.data.data))
+                  : 'close' === e.data.type && (muxLog('websocket.remote.close.requested', { socketId, code: e.data.closeCode, reason: e.data.closeReason || '' }), s(e.data.closeCode, e.data.closeReason));
               }),
+                muxLog('websocket.remote.ready', { socketId }),
                 o.call(t, { type: 'websocket' }));
             })(a, r, e));
         } catch (e) {

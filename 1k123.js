@@ -121,6 +121,31 @@ function isAppShellRequest(request, url) {
   return false;
 }
 
+// The page-side Scramjet bundle contains its own BareMux copy. During a
+// normal startup race it retries the SharedWorker handoff once per second,
+// but the upstream bundle logs each retry as a warning. Keep the behavior and
+// the real invalid-port error intact while moving only those known transient
+// messages to debug level so the console remains usable.
+async function quietScramjetRetryWarnings(response, url) {
+  if (!response || !response.ok || url.pathname !== '/q9vx/sj.all.js') return response;
+  try {
+    var source = await response.clone().text();
+    var quiet = source
+      .replace('console.warn("bare-mux: failed to get a bare-mux SharedWorker MessagePort within 1s, retrying")', 'console.debug("[Nexus:mux] SharedWorker port not ready after 1s; retrying")')
+      .replace('console.warn("bare-mux: Failed to get a ping response from the worker within 1.5s. Assuming port is dead.")', 'console.debug("[Nexus:mux] worker ping timed out; recreating the port")');
+    if (quiet === source) return response;
+    var headers = new Headers(response.headers);
+    headers.delete('content-length');
+    headers.delete('content-encoding');
+    headers.delete('etag');
+    L.log('quieted transient Scramjet/BareMux retry warnings in page bundle');
+    return new Response(quiet, { status: response.status, statusText: response.statusText, headers: headers });
+  } catch (error) {
+    L.warn('could not quiet Scramjet/BareMux retry warnings; serving original bundle', error);
+    return response;
+  }
+}
+
 function delay(ms) {
   return new Promise(function (resolve) {
     setTimeout(resolve, ms);
@@ -438,6 +463,9 @@ self.addEventListener('fetch', function (event) {
               ? new Response(res.body, res)
               : res.clone();
           }
+          if (url.pathname === '/q9vx/sj.all.js') {
+            return quietScramjetRetryWarnings(res, url);
+          }
           return res;
         }).catch(function (e) {
           L.err('app-shell passthrough fetch failed', url.pathname, e);
@@ -458,7 +486,11 @@ self.addEventListener('message', function (msg) {
     playgroundData = data;
   }
   if (data.scramjet$type === 'loadConfig') {
-    L.log('received loadConfig postMessage from a client');
+    L.log('received loadConfig postMessage from a client', {
+      sourceId: msg.source && msg.source.id ? msg.source.id : null,
+      sourceUrl: msg.source && msg.source.url ? msg.source.url : null,
+      hasController: !!(msg.source && msg.source.id),
+    });
     var p = applyConfigMessage(data);
     if (typeof msg.waitUntil === 'function') {
       try {
@@ -472,12 +504,21 @@ self.addEventListener('message', function (msg) {
     // SW had finished processing the config message.
     p.then(function () {
       var ready = configReady(_engine.config);
-      L.log('replying configAck', { ready: ready });
+      L.log('replying configAck', {
+        ready: ready,
+        sourceId: msg.source && msg.source.id ? msg.source.id : null,
+        sourceUrl: msg.source && msg.source.url ? msg.source.url : null,
+      });
       if (msg.source) {
         try {
           msg.source.postMessage({ nexus$type: 'configAck', ready: ready });
         } catch (e) {}
       }
+    }).catch(function (error) {
+      L.err('loadConfig apply failed before configAck', {
+        sourceId: msg.source && msg.source.id ? msg.source.id : null,
+        message: error && error.message ? error.message : String(error),
+      });
     });
   }
 });

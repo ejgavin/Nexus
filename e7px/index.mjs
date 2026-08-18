@@ -1492,6 +1492,30 @@ async function __wbg_init(module_or_path) {
 var epoxy_bundled_default = __wbg_init;
 var info = { version: '2.1.18-1', minimal: false, release: true, commit: 'e2d1d4e50a97be4a1a242eea6b212cfb77b78426' };
 
+let wispRequestSequence = 0;
+let wispSocketSequence = 0;
+
+function wispUrl(value) {
+  try {
+    const url = new URL(value);
+    return `${url.protocol}//${url.host}${url.pathname}`;
+  } catch (_) {
+    return String(value || '').slice(0, 240);
+  }
+}
+
+function wispError(error) {
+  return { name: error?.name || 'Error', message: error?.message || String(error) };
+}
+
+function wispLog(message, details) {
+  console.log('%c[Nexus:wisp]', 'color:#60a5fa;font-weight:700', new Date().toISOString(), message, details || '');
+}
+
+function wispWarn(message, details) {
+  console.warn('%c[Nexus:wisp]', 'color:#f97316;font-weight:700', new Date().toISOString(), message, details || '');
+}
+
 // src/main.ts
 var opts = [
   'wisp_v2',
@@ -1518,18 +1542,23 @@ var EpoxyTransport = class {
     if (this.opts[opt] != null) opts2[opt] = this.opts[opt];
   }
   async init() {
+    wispLog('init.start', { endpoint: wispUrl(this.wisp) });
     await epoxy_bundled_default();
     let options = new EpoxyClientOptions();
     options.user_agent = navigator.userAgent;
     opts.forEach((x) => this.setopt(options, x));
     this.client = new EpoxyClient(this.wisp, options);
     this.ready = true;
+    wispLog('init.complete', { endpoint: wispUrl(this.wisp), clientVersion: this.client_version });
   }
   async meta() {}
   async request(remote, method, body, headers, signal) {
     if (body instanceof Blob) body = await body.arrayBuffer();
+    const requestId = `wisp-http-${++wispRequestSequence}`;
+    wispLog('request.start', { requestId, method, url: wispUrl(remote.href), bodyBytes: body?.byteLength ?? body?.size ?? 0 });
     try {
       let res = await this.client.fetch(remote.href, { method, body, headers, redirect: 'manual' });
+      wispLog('request.complete', { requestId, status: res.status, url: wispUrl(remote.href), bodyBytes: res.body?.byteLength ?? 0 });
       return {
         body: res.body,
         headers: res.rawHeaders,
@@ -1537,20 +1566,53 @@ var EpoxyTransport = class {
         statusText: res.statusText
       };
     } catch (err) {
-      console.error(err);
+      wispWarn('request.failed', { requestId, url: wispUrl(remote.href), error: wispError(err) });
       throw err;
     }
   }
   connect(url, protocols, requestHeaders, onopen, onmessage, onclose, onerror) {
-    let handlers = new EpoxyHandlers(onopen, onclose, onerror, (data) => (data instanceof Uint8Array ? onmessage(data.buffer) : onmessage(data)));
-    let ws = this.client.connect_websocket(handlers, url.href, protocols, Object.assign(requestHeaders));
+    const socketId = `wisp-ws-${++wispSocketSequence}`;
+    wispLog('websocket.connect.start', { socketId, url: wispUrl(url.href), protocols: protocols || [], headerCount: Object.keys(requestHeaders || {}).length, browserWebSocketOpened: false, upstream: 'Wisp client' });
+    let handlers = new EpoxyHandlers(
+      (protocol) => { wispLog('websocket.upstream.open', { socketId, protocol: protocol || '' }); onopen(protocol); },
+      (code, reason) => { wispWarn('websocket.upstream.close', { socketId, code, reason: reason || '' }); onclose(code, reason); },
+      (error) => { wispWarn('websocket.upstream.error', { socketId, error: wispError(error) }); onerror(error); },
+      (data) => {
+        const value = data instanceof Uint8Array ? data.buffer : data;
+        wispLog('websocket.upstream.message', { socketId, bytes: value?.byteLength ?? value?.length ?? 0, type: typeof value });
+        onmessage(value);
+      },
+    );
+    let ws;
+    try {
+      ws = this.client.connect_websocket(handlers, url.href, protocols, Object.assign(requestHeaders));
+      Promise.resolve(ws).then(
+        () => wispLog('websocket.connect.accepted', { socketId, url: wispUrl(url.href) }),
+        (error) => wispWarn('websocket.connect.rejected', { socketId, error: wispError(error) }),
+      );
+    } catch (error) {
+      wispWarn('websocket.connect.threw', { socketId, error: wispError(error) });
+      throw error;
+    }
     return [
       async (data) => {
-        if (data instanceof Blob) data = await data.arrayBuffer();
-        (await ws).send(data);
+        try {
+          if (data instanceof Blob) data = await data.arrayBuffer();
+          wispLog('websocket.send', { socketId, bytes: data?.byteLength ?? data?.size ?? data?.length ?? 0, type: typeof data });
+          (await ws).send(data);
+        } catch (error) {
+          wispWarn('websocket.send.failed', { socketId, error: wispError(error) });
+          throw error;
+        }
       },
       async (code, reason) => {
-        (await ws).close(code, reason || '');
+        try {
+          wispLog('websocket.close.requested', { socketId, code, reason: reason || '' });
+          (await ws).close(code, reason || '');
+        } catch (error) {
+          wispWarn('websocket.close.failed', { socketId, error: wispError(error) });
+          throw error;
+        }
       }
     ];
   }
