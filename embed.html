@@ -515,7 +515,9 @@
   };
   if (socksEnabled) store.bareurl += (store.bareurl.indexOf('?') >= 0 ? '&' : '?') + 'socks=1';
   var bridgeTransportModule = location.origin + '/httpbridge/index.mjs';
-  var hybridTransportModule = location.origin + '/hybrid/index.mjs';
+  // Keep transport fallback fixes from being hidden by a stale browser/CDN
+  // module cache after a static deployment.
+  var hybridTransportModule = location.origin + '/hybrid/index.mjs?build=math-v5-httpfallback-1';
   log('transport mode resolved', {
     httpBridge: useHttpBridge,
     httpBridgeWebSocketsOnly: useHttpBridgeWsOnly,

@@ -19,6 +19,34 @@ function errorDetails(error) {
   return { name: error?.name || 'Error', message: error?.message || String(error) };
 }
 
+function responsePreview(response) {
+  const body = response?.body;
+  if (!body) return '';
+  try {
+    const bytes = body instanceof Uint8Array
+      ? body
+      : body instanceof ArrayBuffer
+        ? new Uint8Array(body)
+        : ArrayBuffer.isView(body)
+          ? new Uint8Array(body.buffer, body.byteOffset, body.byteLength)
+          : null;
+    return bytes ? new TextDecoder().decode(bytes.subarray(0, 512)) : '';
+  } catch (_) {
+    return '';
+  }
+}
+
+function looksLikeTransportFailure(response, method) {
+  const status = Number(response?.status || 0);
+  if (status >= 502 && status <= 599) return true;
+  if (status !== 500) return false;
+  // A real upstream 500 should remain visible. Treat only generic proxy/
+  // transport failures as a reason to retry the request over the bridge.
+  const preview = responsePreview(response).toLowerCase();
+  return /failed to fetch|network error|request failed|transport|service unavailable|bad gateway/.test(preview)
+    && /^(GET|HEAD|OPTIONS)$/i.test(String(method || 'GET'));
+}
+
 function hybridLog(message, details) {
   console.log('%c[Nexus:hybrid]', 'color:#34d399;font-weight:700', new Date().toISOString(), message, details || '');
 }
@@ -33,6 +61,7 @@ export default class HybridTransport {
     this.bridge = new HttpBridgeTransport({ base: String(bridgeurl || '') });
     this.websocket = this.bridge;
     this.ready = false;
+    this.wispUnavailable = false;
     hybridLog('constructed', {
       httpTransport: 'Wisp',
       websocketTransport: 'HTTP bridge',
@@ -64,10 +93,30 @@ export default class HybridTransport {
   request(remote, method, body, headers, signal) {
     const requestId = `http-${++hybridRequestSequence}`;
     hybridLog('request.start', { requestId, method, url: endpoint(remote.href) });
+    if (this.wispUnavailable) {
+      hybridLog('request.httpbridge.direct', { requestId, reason: 'Wisp previously failed' });
+      return this.bridge.request(remote, method, body, headers, signal).then((response) => {
+        hybridLog('request.httpbridge.complete', { requestId, status: response.status });
+        return response;
+      });
+    }
     return this.http.request(remote, method, body, headers, signal).then((response) => {
+      if (looksLikeTransportFailure(response, method)) {
+        this.wispUnavailable = true;
+        hybridWarn('request.wisp returned transport-like failure; switching session to HTTP bridge', {
+          requestId,
+          status: response.status,
+          preview: responsePreview(response).slice(0, 160),
+        });
+        return this.bridge.request(remote, method, body, headers, signal).then((bridgeResponse) => {
+          hybridLog('request.httpbridge.complete', { requestId, status: bridgeResponse.status, afterWispStatus: response.status });
+          return bridgeResponse;
+        });
+      }
       hybridLog('request.wisp.complete', { requestId, status: response.status });
       return response;
     }).catch((error) => {
+      this.wispUnavailable = true;
       hybridWarn('request.wisp.failed; using HTTP bridge fallback', { requestId, error: errorDetails(error) });
       return this.bridge.request(remote, method, body, headers, signal).then((response) => {
         hybridLog('request.httpbridge.complete', { requestId, status: response.status });
