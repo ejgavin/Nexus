@@ -13,12 +13,12 @@
     // landing page. The session marker prevents a reload loop.
     window.__nexusSwMigration = (async function () {
       try {
-        var marker = 'nexus-sw-migration-math-v3';
+        var marker = 'nexus-sw-migration-math-v4';
         if (sessionStorage.getItem(marker) === '1') return;
         var registrations = await navigator.serviceWorker.getRegistrations();
         var stale = registrations.filter(function (registration) {
           var worker = registration.active || registration.waiting || registration.installing;
-          return worker && /\/1k123\.js(?:\?|$)/.test(worker.scriptURL) && !/build=math-v3(?:&|$)/.test(worker.scriptURL);
+          return worker && /\/1k123\.js(?:\?|$)/.test(worker.scriptURL) && !/build=math-v4(?:&|$)/.test(worker.scriptURL);
         });
         if (!stale.length) return;
         sessionStorage.setItem(marker, '1');
@@ -420,6 +420,14 @@
       all:  '/q9vx/sj.all.js',
       sync: '/q9vx/sj.sync.js',
     },
+    // Modern sites inspect Map/Set/DataView using Symbol.toStringTag.
+    // Strict rewriting makes those startup checks throw before WebSocket
+    // code is reached, so use the compatibility rewrite mode here.
+    flags: {
+      strictRewrites: false,
+      allowInvalidJs: true,
+      allowFailedIntercepts: true,
+    },
     restrictPatterns: restrictPatterns,
     adblockEnabled: adblockEnabled,
   };
@@ -766,12 +774,12 @@
     await window.__nexusIdbReady;
     log('sendConfigAndWait() -> engine.init()');
     await engine.init();
-    var ok = await waitForConfigAck(3000);
+    var ok = await waitForConfigAck(10000);
     if (!ok) {
       warn('config ack failed, retrying engine.init() once');
       // One retry — covers a slow-starting SW thread
       await engine.init();
-      ok = await waitForConfigAck(3000);
+      ok = await waitForConfigAck(10000);
     }
     log('sendConfigAndWait() resolved', ok);
     return ok;
@@ -785,7 +793,7 @@
       // Change this identifier whenever transport code changes. Service
       // workers can otherwise keep an older 1k123.js alive after a Netlify
       // deployment, making the browser appear to ignore the HTTP bridge.
-      var reg = await navigator.serviceWorker.register('/1k123.js?build=math-v3', {
+      var reg = await navigator.serviceWorker.register('/1k123.js?build=math-v4', {
         updateViaCache: 'none',
         scope: '/',
       });
