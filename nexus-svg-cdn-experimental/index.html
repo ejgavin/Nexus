@@ -13,12 +13,12 @@
     // page after a Netlify deployment has published math-v2.
     window.__nexusSwMigration = (async function () {
       try {
-        var marker = 'nexus-sw-migration-math-v5-wsdiag';
+        var marker = 'nexus-sw-migration-svg-bodyfix-1';
         if (sessionStorage.getItem(marker) === '1') return;
         var registrations = await navigator.serviceWorker.getRegistrations();
         var stale = registrations.filter(function (registration) {
           var worker = registration.active || registration.waiting || registration.installing;
-          return worker && /\/1k123\.js(?:\?|$)/.test(worker.scriptURL) && !/build=math-v5-wsdiag(?:&|$)/.test(worker.scriptURL);
+          return worker && /\/1k123\.js(?:\?|$)/.test(worker.scriptURL) && !/build=svg-cdn-bodyfix-1(?:&|$)/.test(worker.scriptURL);
         });
         if (!stale.length) return;
         sessionStorage.setItem(marker, '1');

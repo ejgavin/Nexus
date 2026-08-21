@@ -286,6 +286,60 @@ function unwrapAppUrl(pathname) {
   return current !== decoded ? current : null;
 }
 
+var _requestBodyStreamsTransfer = null;
+function requestBodyStreamsTransfer() {
+  if (_requestBodyStreamsTransfer !== null) return _requestBodyStreamsTransfer;
+  if (typeof MessageChannel === 'undefined' || typeof ReadableStream === 'undefined') {
+    _requestBodyStreamsTransfer = false;
+    return _requestBodyStreamsTransfer;
+  }
+  try {
+    var channel = new MessageChannel();
+    var stream = new ReadableStream();
+    channel.port1.postMessage(stream, [stream]);
+    channel.port1.close();
+    channel.port2.close();
+    _requestBodyStreamsTransfer = true;
+  } catch (_) {
+    _requestBodyStreamsTransfer = false;
+  }
+  return _requestBodyStreamsTransfer;
+}
+
+async function preserveRequestBody(event) {
+  var request = event.request;
+  var method = String(request.method || 'GET').toUpperCase();
+  var transferable = requestBodyStreamsTransfer();
+  if (method !== 'GET' && method !== 'HEAD') {
+    L.log('request body observed at SW ingress', {
+      method,
+      hasBody: !!request.body,
+      bodyType: request.body?.constructor?.name || null,
+      transferableStreams: transferable
+    });
+  }
+  if (!request.body || method === 'GET' || method === 'HEAD' || transferable) return event;
+  try {
+    // Firefox and some embedded browsers cannot transfer a ReadableStream
+    // through MessagePort. Convert only in that case so POST bodies arrive at
+    // the configured Wisp/HTTP transport as transferable bytes.
+    var bytes = await new Response(request.body).arrayBuffer();
+    var rebuilt = new Request(request, { body: bytes, duplex: 'half' });
+    L.log('buffered non-transferable request body', {
+      method,
+      bytes: bytes.byteLength,
+      bodyType: request.body.constructor?.name || 'ReadableStream'
+    });
+    return new FetchEvent('fetch', { request: rebuilt });
+  } catch (error) {
+    L.err('failed to preserve request body; continuing with original request', {
+      method,
+      message: error && error.message ? error.message : String(error)
+    });
+    return event;
+  }
+}
+
 async function handleRequest(event) {
   var url;
   try {
@@ -393,12 +447,18 @@ async function handleRequest(event) {
     var realUrl = unwrapAppUrl(url.pathname);
     if (realUrl) {
       var fixedUrl = self.location.origin + _pref + encodeURIComponent(realUrl);
-      L.warn('recursively-wrapped application URL detected, unwrapping', { from: url.pathname, to: fixedUrl });
+      L.warn('recursively-wrapped application URL detected, unwrapping', {
+        from: url.pathname,
+        to: fixedUrl,
+        method: event.request.method,
+        hasBody: !!event.request.body,
+        bodyType: event.request.body?.constructor?.name || null
+      });
       try {
-        var fixedRequest = new Request(fixedUrl, {
-          method: event.request.method,
-          headers: event.request.headers,
-        });
+        // Clone the original Request as the init object so its body stream,
+        // headers, credentials, and redirect metadata all survive the URL
+        // repair. Rebuilding from only method+headers silently emptied POSTs.
+        var fixedRequest = new Request(fixedUrl, event.request);
         event = new FetchEvent('fetch', { request: fixedRequest });
         url = new URL(fixedUrl);
       } catch (e) {
@@ -409,6 +469,8 @@ async function handleRequest(event) {
       }
     }
   }
+
+  event = await preserveRequestBody(event);
 
   var ready = await ensureConfig();
   if (!ready || !configReady(_engine.config)) {

@@ -13,12 +13,12 @@
     // landing page. The session marker prevents a reload loop.
     window.__nexusSwMigration = (async function () {
       try {
-        var marker = 'nexus-sw-migration-math-v5-wsdiag';
+        var marker = 'nexus-sw-migration-math-v5-bodyfix-1';
         if (sessionStorage.getItem(marker) === '1') return;
         var registrations = await navigator.serviceWorker.getRegistrations();
         var stale = registrations.filter(function (registration) {
           var worker = registration.active || registration.waiting || registration.installing;
-          return worker && /\/1k123\.js(?:\?|$)/.test(worker.scriptURL) && !/build=math-v5-wsdiag(?:&|$)/.test(worker.scriptURL);
+          return worker && /\/1k123\.js(?:\?|$)/.test(worker.scriptURL) && !/build=math-v5-bodyfix-1(?:&|$)/.test(worker.scriptURL);
         });
         if (!stale.length) return;
         sessionStorage.setItem(marker, '1');
@@ -842,7 +842,7 @@
       // Change this identifier whenever transport code changes. Service
       // workers can otherwise keep an older 1k123.js alive after a Netlify
       // deployment, making the browser appear to ignore the HTTP bridge.
-      var reg = await navigator.serviceWorker.register('/1k123.js?build=math-v5-wsdiag', {
+      var reg = await navigator.serviceWorker.register('/1k123.js?build=math-v5-bodyfix-1', {
         updateViaCache: 'none',
         scope: '/',
       });
