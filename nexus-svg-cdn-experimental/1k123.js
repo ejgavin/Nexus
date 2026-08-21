@@ -84,6 +84,7 @@ var _preloadPromise = Promise.resolve();
 
 var _pref = _nexusBase + 'math/';
 var _legacyPref = _nexusBase + 'afsd123k2/';
+var _svgEmbed = _nexusBase + 'embed.svg';
 var _hydrated = false;
 var _configPromise = null;
 
@@ -111,7 +112,7 @@ function isAppShellRequest(request, url) {
   if (url.origin !== self.location.origin) return false;
   var path = url.pathname;
   if (path.indexOf(_pref) === 0) return false;
-  if (path === _nexusBase || path === _nexusBase + 'index.html' || path === _nexusBase + 'index.svg' ||
+  if (path === _nexusBase || path === _nexusBase + 'index.html' || path === _nexusBase + 'index.svg' || path === _nexusBase + 'embed.svg' ||
       path === _nexusBase + 'embed' || path === _nexusBase + 'embed.html' ||
       path === _nexusBase + '1k123.js' || path === _nexusBase + 'config.js' || path === _nexusBase + 'worker.js' ||
       path === _nexusBase + 'cache-mgr.js') return true;
@@ -290,6 +291,49 @@ function unwrapAppUrl(pathname) {
   return current !== decoded ? current : null;
 }
 
+function isTopLevelDocumentNavigation(request) {
+  if (!request || request.mode !== 'navigate') return false;
+  // Request.destination is "document" for the browser's top-level address
+  // bar navigation and "iframe" for ScramjetFrame.go(). Keep the header check
+  // as a Firefox/older-browser fallback.
+  return request.destination === 'document' || request.headers.get('sec-fetch-dest') === 'document';
+}
+
+function encodeBase64Url(value) {
+  var bytes = new TextEncoder().encode(String(value));
+  var binary = '';
+  for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function decodeApplicationTarget(pathname, prefix) {
+  if (pathname.indexOf(prefix) !== 0) return null;
+  var current = pathname.slice(prefix.length);
+  for (var i = 0; i < 8; i++) {
+    try { current = decodeURIComponent(current); } catch (_) { return null; }
+    if (/^https?:\/\//i.test(current)) {
+      try {
+        var target = new URL(current);
+        return target.protocol === 'http:' || target.protocol === 'https:' ? target.href : null;
+      } catch (_) { return null; }
+    }
+  }
+  return null;
+}
+
+function directEmbedRedirect(event, url) {
+  if (!isTopLevelDocumentNavigation(event.request) || url.origin !== self.location.origin) return null;
+  var target = decodeApplicationTarget(url.pathname, _pref) || decodeApplicationTarget(url.pathname, _legacyPref);
+  if (!target) return null;
+  var redirectTo = self.location.origin + _svgEmbed + '#b64.' + encodeBase64Url(target);
+  L.warn('top-level application navigation detected; returning to SVG embed shell', {
+    from: url.pathname,
+    to: redirectTo,
+    destination: event.request.destination,
+  });
+  return Response.redirect(redirectTo, 302);
+}
+
 async function handleRequest(event) {
   var url;
   try {
@@ -297,6 +341,14 @@ async function handleRequest(event) {
   } catch (e) {
     return fetch(event.request);
   }
+
+  // A browser address-bar navigation can land directly on Scramjet's encoded
+  // /math/ route. That route is meant for the inner browsing frame, not as a
+  // top-level document, so return it to the SVG shell with the destination in
+  // the hash. Inner iframe navigations are left alone because their fetch
+  // destination is "iframe", not "document".
+  var directRedirect = directEmbedRedirect(event, url);
+  if (directRedirect) return directRedirect;
 
   // Accept links produced by an older build and move them to the current
   // route. This prevents stale tabs/bookmarks from becoming a 404 after the

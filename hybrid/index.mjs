@@ -58,23 +58,24 @@ function hybridWarn(message, details) {
 }
 
 export default class HybridTransport {
-  constructor(wispurl, bridgeurl) {
+  constructor(wispurl, bridgeurl, ssebridgeurl) {
     this.http = new WispTransport({ wisp: String(wispurl || '') });
-    this.bridge = new HttpBridgeTransport({ base: String(bridgeurl || '') });
+    this.bridge = new HttpBridgeTransport({ base: String(bridgeurl || ''), websocketBase: String(ssebridgeurl || bridgeurl || '') });
     this.websocket = this.bridge;
     this.ready = false;
     this.wispUnavailable = false;
     this.bridgeTimeoutMs = 5000;
     hybridLog('constructed', {
       httpTransport: 'Wisp',
-      websocketTransport: 'HTTP bridge',
+      websocketTransport: ssebridgeurl ? 'SSE WebSocket bridge' : 'HTTP bridge event stream',
       wisp: endpoint(wispurl),
       bridge: endpoint(bridgeurl),
+      sseBridge: endpoint(ssebridgeurl || bridgeurl),
     });
   }
 
   async init() {
-    hybridLog('init.start', { http: 'Wisp', websocket: 'HTTP bridge' });
+    hybridLog('init.start', { http: 'Wisp', websocket: this.bridge.websocketBase !== this.bridge.base ? 'SSE WebSocket bridge' : 'HTTP bridge event stream' });
     const httpInit = this.http.init().then(() => hybridLog('init.wisp.ready', { endpoint: endpoint(this.http.wisp) }));
     const bridgeInit = this.bridge.init().then(() => hybridLog('init.httpbridge.ready', { endpoint: endpoint(this.bridge.base) }));
     try {

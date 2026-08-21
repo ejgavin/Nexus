@@ -37,21 +37,23 @@
     try {
       window.__nexusMuxHandshake = new BareMux.BareMuxConnection(NEXUS_BASE + 'm4thx/worker.js');
       var rootQuery = new URLSearchParams(location.search);
-      var rootHttpBridge = rootQuery.get('httpbridge') === '1' || rootQuery.get('httpbridgews') === '1' ||
+      var rootHttpBridge = rootQuery.get('httpbridge') === '1' || rootQuery.get('httpbridgews') === '1' || rootQuery.get('ssews') === '1' ||
         rootQuery.get('transport') === 'httpbridge' || rootQuery.get('transport') === 'hybrid' ||
         (rootQuery.get('transport') !== 'wisp' && localStorage.getItem('nexus-httpbridge-setting') !== '0');
       var rootWsOnly = rootHttpBridge && (rootQuery.get('httpbridgews') === '1' ||
         rootQuery.get('transport') === 'hybrid' ||
         ((!rootQuery.has('httpbridge') && !rootQuery.has('httpbridgews') && !rootQuery.has('transport')) &&
           localStorage.getItem('nexus-httpbridge-ws-setting') === '1'));
+      var rootSseWs = rootHttpBridge && (rootQuery.get('ssews') === '1' ||
+        (!rootQuery.has('ssews') && localStorage.getItem('nexus-sse-ws-setting') === '1'));
       var rootTransport = rootWsOnly ? NEXUS_BASE + 'hybrid/index.mjs' : (rootHttpBridge ? NEXUS_BASE + 'httpbridge/index.mjs' : NEXUS_BASE + 'm4thx/index.mjs');
-      var rootArgs = rootWsOnly ? [_CONFIG.wispurl, _CONFIG.bridgeurl] : (rootHttpBridge ? [_CONFIG.bridgeurl] : [_CONFIG.bareurl]);
+      var rootArgs = rootWsOnly ? [_CONFIG.wispurl, _CONFIG.bridgeurl, rootSseWs ? _CONFIG.ssebridgeurl : ''] : (rootHttpBridge ? [_CONFIG.bridgeurl, rootSseWs ? _CONFIG.ssebridgeurl : ''] : [_CONFIG.bareurl]);
       window.__nexusMuxTransportReady = Promise.resolve(window.__nexusSwMigration).then(function () {
         return window.__nexusMuxHandshake.setTransport(rootTransport, rootArgs);
       })
         .then(function () {
           console.log('%c[Nexus:parent]', 'color:#3b7ef6;font-weight:700', 'bare-mux responder ready', {
-            transport: rootWsOnly ? 'hybrid' : (rootHttpBridge ? 'http bridge' : 'bare HTTP'),
+            transport: rootWsOnly ? (rootSseWs ? 'hybrid + SSE WebSocket bridge' : 'hybrid') : (rootHttpBridge ? (rootSseWs ? 'HTTP bridge + SSE WebSocket bridge' : 'http bridge') : 'bare HTTP'),
             endpoint: _CONFIG.bridgeurl,
           });
         })
@@ -339,6 +341,10 @@
             <input id="use-httpbridge-ws-only" type="checkbox"/>
             <div class="setting-label"><label for="use-httpbridge-ws-only">HTTP bridge for WebSockets only</label><small>Keep normal page requests on Wisp/bare and use the bridge for WebSocket traffic.</small></div>
           </div>
+          <div class="setting-row setting-subrow">
+            <input id="use-sse-ws" type="checkbox"/>
+            <div class="setting-label"><label for="use-sse-ws">Use SSE for WebSockets</label><small>Experimental: receive WebSocket events over an SSE stream; outgoing messages still use HTTP.</small></div>
+          </div>
           <div class="setting-row">
             <input id="use-adblock" type="checkbox"/>
             <div class="setting-label"><label for="use-adblock">Built-in ad blocker</label><small>Block common ad, tracker, popup, and ad-container requests.</small></div>
@@ -467,6 +473,7 @@
   var settingsPanel = document.getElementById('settings-panel');
   var useHttpBridgeInput = document.getElementById('use-httpbridge');
   var useHttpBridgeWsOnlyInput = document.getElementById('use-httpbridge-ws-only');
+  var useSseWsInput = document.getElementById('use-sse-ws');
   var useAdblockInput = document.getElementById('use-adblock');
   var useSocksInput = document.getElementById('use-socks');
   var tabList = document.getElementById('tab-list');
@@ -479,6 +486,7 @@
   // Preserve transport flags when the parent creates a fresh embed frame.
   var useHttpBridge = query.get('httpbridge') === '1' ||
     query.get('httpbridgews') === '1' ||
+    query.get('ssews') === '1' ||
     query.get('transport') === 'httpbridge' ||
     query.get('transport') === 'hybrid' ||
     (query.get('transport') !== 'wisp' && localStorage.getItem('nexus-httpbridge-setting') !== '0');
@@ -486,6 +494,8 @@
     query.get('httpbridgews') === '1' ||
     query.get('transport') === 'hybrid' ||
     localStorage.getItem('nexus-httpbridge-ws-setting') === '1');
+  var useSseWs = useHttpBridge && (query.get('ssews') === '1' ||
+    (!query.has('ssews') && localStorage.getItem('nexus-sse-ws-setting') === '1'));
   var adblockEnabled = query.get('adblock') !== '0' && localStorage.getItem('nexus-adblock-setting') !== '0';
   var socksEnabled = query.get('socks') === '1' || localStorage.getItem('nexus-socks-setting') === '1';
   var cleanParam = query.get('clean') || query.get('remove') || query.get('remove_element');
@@ -494,6 +504,8 @@
   useHttpBridgeInput.checked = useHttpBridge;
   useHttpBridgeWsOnlyInput.checked = useHttpBridgeWsOnly;
   useHttpBridgeWsOnlyInput.disabled = !useHttpBridge;
+  useSseWsInput.checked = useSseWs;
+  useSseWsInput.disabled = !useHttpBridge;
   useAdblockInput.checked = adblockEnabled;
   useSocksInput.checked = socksEnabled;
 
@@ -905,6 +917,7 @@
       if (cleanSelector) params.push('remove_selector=' + encodeURIComponent(cleanSelector));
       if (useHttpBridge) params.push('httpbridge=1');
       if (useHttpBridge && useHttpBridgeWsOnly) params.push('httpbridgews=1');
+      if (useHttpBridge && useSseWs) params.push('ssews=1');
       params.push('adblock=' + (adblockEnabled ? '1' : '0'));
       if (socksEnabled) params.push('socks=1');
       if (params.length) src = embedEntry + '?' + params.join('&') + '#' + encodedTarget;
@@ -994,10 +1007,12 @@
   document.getElementById('settings-apply').onclick = function () {
     useHttpBridge = !!useHttpBridgeInput.checked;
     useHttpBridgeWsOnly = useHttpBridge && !!useHttpBridgeWsOnlyInput.checked;
+    useSseWs = useHttpBridge && !!useSseWsInput.checked;
     adblockEnabled = !!useAdblockInput.checked;
     socksEnabled = !!useSocksInput.checked;
     try { localStorage.setItem('nexus-httpbridge-setting', useHttpBridge ? '1' : '0'); } catch (_) {}
     try { localStorage.setItem('nexus-httpbridge-ws-setting', useHttpBridgeWsOnly ? '1' : '0'); } catch (_) {}
+    try { localStorage.setItem('nexus-sse-ws-setting', useSseWs ? '1' : '0'); } catch (_) {}
     try { localStorage.setItem('nexus-adblock-setting', adblockEnabled ? '1' : '0'); } catch (_) {}
     try { localStorage.setItem('nexus-socks-setting', socksEnabled ? '1' : '0'); } catch (_) {}
     if (activeTab && activeTab.embedReady) cmd('setAdblock', { enabled: adblockEnabled });
@@ -1007,14 +1022,17 @@
   document.getElementById('settings-reset').onclick = function () {
     useHttpBridgeInput.checked = true;
     useHttpBridgeWsOnlyInput.checked = false;
+    useSseWsInput.checked = false;
     useHttpBridge = true;
     useHttpBridgeWsOnly = false;
+    useSseWs = false;
     adblockEnabled = true;
     useAdblockInput.checked = true;
     socksEnabled = false;
     useSocksInput.checked = false;
     try { localStorage.setItem('nexus-httpbridge-setting', '1'); } catch (_) {}
     try { localStorage.setItem('nexus-httpbridge-ws-setting', '0'); } catch (_) {}
+    try { localStorage.setItem('nexus-sse-ws-setting', '0'); } catch (_) {}
     try { localStorage.setItem('nexus-adblock-setting', '1'); } catch (_) {}
     try { localStorage.setItem('nexus-socks-setting', '0'); } catch (_) {}
     settingsPanel.classList.remove('open');
@@ -1022,6 +1040,8 @@
   useHttpBridgeInput.addEventListener('change', function () {
     useHttpBridgeWsOnlyInput.disabled = !useHttpBridgeInput.checked;
     if (!useHttpBridgeInput.checked) useHttpBridgeWsOnlyInput.checked = false;
+    useSseWsInput.disabled = !useHttpBridgeInput.checked;
+    if (!useHttpBridgeInput.checked) useSseWsInput.checked = false;
   });
 
   // Familiar browser shortcuts while the normal Nexus page is focused.

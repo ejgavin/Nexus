@@ -27,6 +27,9 @@ var _CONFIG = {
   // both page requests and WebSocket traffic without initializing Wisp.
   // The optional WebSockets-only setting intentionally selects hybrid mode.
   bridgeurl: _serverHttp + '/api/wsbridge/',
+  // Opt-in SSE WebSocket bridge. Page requests still use bridgeurl; only
+  // WebSocket events/sends use this separate backend route when enabled.
+  ssebridgeurl: _serverHttp + '/api/ssebridge/',
 
   // Optional DOM cleanup used inside proxied pages. The query-string/UI
   // setting can turn this on without changing the bundled request engine.

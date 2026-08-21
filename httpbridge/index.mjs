@@ -126,15 +126,24 @@ async function readEvents(response, onEvent, signal, state) {
 }
 
 export default class HttpBridgeTransport {
-  constructor(options) {
-    this.base = String(options?.base || options || '').replace(/\/+$/, '');
+  constructor(options, websocketBase) {
+    const config = options && typeof options === 'object'
+      ? options
+      : { base: options, websocketBase };
+    this.base = String(config?.base || '').replace(/\/+$/, '');
+    this.websocketBase = String(config?.websocketBase || this.base).replace(/\/+$/, '');
     this.ready = false;
   }
 
   async init() {
     if (!this.base) throw new Error('HTTP bridge endpoint is missing');
     this.ready = true;
-    bridgeLog('transport initialized', { endpoint: safeUrl(this.base), transport: 'HTTP bridge; no browser WebSocket opened' });
+    bridgeLog('transport initialized', {
+      endpoint: safeUrl(this.base),
+      websocketEndpoint: safeUrl(this.websocketBase),
+      websocketMode: this.websocketBase !== this.base ? 'SSE WebSocket bridge' : 'HTTP bridge event stream',
+      transport: 'HTTP bridge; no browser WebSocket opened',
+    });
   }
 
   async meta() {}
@@ -193,8 +202,10 @@ export default class HttpBridgeTransport {
 
     const run = async () => {
       try {
-        bridgeLog('WebSocket bridge lifecycle: open.start', { id: state.id, url: safeUrl(url.href), protocols: protocols || [], headerCount: Object.keys(headerObject(requestHeaders)).length });
-        const openResponse = await fetch(`${this.base}/open`, {
+        const socketBase = this.websocketBase;
+        const websocketMode = socketBase !== this.base ? 'SSE WebSocket bridge' : 'HTTP bridge event stream';
+        bridgeLog('WebSocket bridge lifecycle: open.start', { id: state.id, url: safeUrl(url.href), protocols: protocols || [], headerCount: Object.keys(headerObject(requestHeaders)).length, websocketMode, endpoint: safeUrl(socketBase) });
+        const openResponse = await fetch(`${socketBase}/open`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ url: url.href, protocols }),
@@ -207,10 +218,10 @@ export default class HttpBridgeTransport {
           throw new Error(opened.error || `HTTP bridge open failed (${openResponse.status})`);
         }
         state.upstreamId = opened.id;
-        bridgeLog('WebSocket bridge lifecycle: open.accepted', { id: state.id, upstreamId: state.upstreamId, events: safeUrl(new URL(opened.events, this.base + '/').href), protocol: opened.protocol || '' });
+        bridgeLog('WebSocket bridge lifecycle: open.accepted', { id: state.id, upstreamId: state.upstreamId, events: safeUrl(new URL(opened.events, socketBase + '/').href), protocol: opened.protocol || '', websocketMode });
 
         bridgeLog('WebSocket bridge lifecycle: events.start', { id: state.id, upstreamId: state.upstreamId });
-        const eventResponse = await fetch(new URL(opened.events, this.base + '/').href, {
+        const eventResponse = await fetch(new URL(opened.events, socketBase + '/').href, {
           signal: state.abort.signal,
           cache: 'no-store',
         });
@@ -255,14 +266,14 @@ export default class HttpBridgeTransport {
         const bytes = await toBytes(data);
         state.sends += 1;
         bridgeLog('WebSocket bridge lifecycle: send.start', { id: state.id, upstreamId: state.upstreamId, sequence: state.sends, ...dataDetails(data), binary: typeof data !== 'string' });
-        const response = await fetch(`${this.base}/send/${state.upstreamId}`, {
+        const response = await fetch(`${this.websocketBase}/send/${state.upstreamId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ data: toBase64(bytes), binary: typeof data !== 'string' }),
         });
         if (!response.ok) {
           bridgeWarn('WebSocket bridge lifecycle: send.failed', { id: state.id, upstreamId: state.upstreamId, sequence: state.sends, status: response.status });
-          throw new Error(`HTTP bridge send failed (${response.status})`);
+          throw new Error(`WebSocket bridge send failed (${response.status})`);
         }
         bridgeLog('WebSocket bridge lifecycle: send.complete', { id: state.id, upstreamId: state.upstreamId, sequence: state.sends, status: response.status });
       },
@@ -272,7 +283,7 @@ export default class HttpBridgeTransport {
         bridgeLog('WebSocket bridge lifecycle: close.start', { id: state.id, upstreamId: state.upstreamId, code, reason });
         state.abort.abort();
         if (state.upstreamId) {
-          await fetch(`${this.base}/close/${state.upstreamId}`, {
+          await fetch(`${this.websocketBase}/close/${state.upstreamId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ code, reason }),

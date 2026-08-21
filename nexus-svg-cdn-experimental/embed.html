@@ -482,6 +482,7 @@
   } catch (_) {}
   var useHttpBridge = transportQuery.get('httpbridge') === '1' ||
     transportQuery.get('httpbridgews') === '1' ||
+    transportQuery.get('ssews') === '1' ||
     transportQuery.get('transport') === 'httpbridge' ||
     transportQuery.get('transport') === 'hybrid' ||
     (referrerQuery && (referrerQuery.get('httpbridge') === '1' ||
@@ -498,10 +499,14 @@
       (!referrerQuery || (!referrerQuery.has('httpbridge') && !referrerQuery.has('httpbridgews') && !referrerQuery.has('transport'))) &&
       localStorage.getItem('nexus-httpbridge-ws-setting') === '1') ||
     (typeof _CONFIG !== 'undefined' && _CONFIG.transport === 'hybrid'));
+  var useSseWs = useHttpBridge && (transportQuery.get('ssews') === '1' ||
+    (referrerQuery && referrerQuery.get('ssews') === '1') ||
+    ((!transportQuery.has('ssews') && (!referrerQuery || !referrerQuery.has('ssews'))) &&
+      localStorage.getItem('nexus-sse-ws-setting') === '1'));
   if (useHttpBridge) {
-    if (!transportQuery.has('httpbridge') && !transportQuery.has('httpbridgews') && !transportQuery.has('transport')) {
+    if (!transportQuery.has('httpbridge') && !transportQuery.has('httpbridgews') && !transportQuery.has('ssews') && !transportQuery.has('transport')) {
       try {
-        history.replaceState(null, '', location.pathname + '?httpbridge=1' + (useHttpBridgeWsOnly ? '&httpbridgews=1' : '') + location.hash);
+        history.replaceState(null, '', location.pathname + '?httpbridge=1' + (useHttpBridgeWsOnly ? '&httpbridgews=1' : '') + (useSseWs ? '&ssews=1' : '') + location.hash);
         transportQuery = new URLSearchParams(location.search);
         log('restored httpbridge flag after URL rewrite', location.href);
       } catch (_) {}
@@ -513,6 +518,8 @@
       location.protocol + '//' + location.host + '/api/edge/',
     bridgeurl: (typeof _CONFIG !== 'undefined' && _CONFIG.bridgeurl) ||
       location.protocol + '//' + location.host + '/api/wsbridge/',
+    ssebridgeurl: (typeof _CONFIG !== 'undefined' && _CONFIG.ssebridgeurl) ||
+      location.protocol + '//' + location.host + '/api/ssebridge/',
   };
   if (socksEnabled) store.bareurl += (store.bareurl.indexOf('?') >= 0 ? '&' : '?') + 'socks=1';
   var bridgeTransportModule = location.origin + NEXUS_BASE + 'httpbridge/index.mjs';
@@ -525,6 +532,7 @@
     query: location.search,
     controller: navigator.serviceWorker.controller ? navigator.serviceWorker.controller.scriptURL : null,
     bridge: store.bridgeurl,
+    sseBridge: useSseWs ? store.ssebridgeurl : null,
   });
   log('transport endpoints resolved', store);
 
@@ -694,11 +702,11 @@
       for (var bridgeAttempt = 0; bridgeAttempt < 8; bridgeAttempt++) {
         try {
           if (useHttpBridgeWsOnly) {
-            await connection[setT](hybridTransportModule, [store.wispurl, store.bridgeurl]);
-            log('transport set: Wisp + HTTP bridge for WebSockets', { wisp: store.wispurl, bridge: store.bridgeurl });
+            await connection[setT](hybridTransportModule, [store.wispurl, store.bridgeurl, useSseWs ? store.ssebridgeurl : '']);
+            log('transport set: Wisp + ' + (useSseWs ? 'SSE WebSocket bridge' : 'HTTP bridge for WebSockets'), { wisp: store.wispurl, bridge: store.bridgeurl, sseBridge: useSseWs ? store.ssebridgeurl : null });
           } else {
-            await connection[setT](bridgeTransportModule, [store.bridgeurl]);
-            log('transport set: HTTP bridge for pages and WebSockets', store.bridgeurl);
+            await connection[setT](bridgeTransportModule, [store.bridgeurl, useSseWs ? store.ssebridgeurl : '']);
+            log('transport set: HTTP bridge for pages + ' + (useSseWs ? 'SSE WebSockets' : 'WebSockets'), { bridge: store.bridgeurl, sseBridge: useSseWs ? store.ssebridgeurl : null });
           }
           transportReady = true;
           return;
@@ -737,11 +745,11 @@
             if (i >= 7) {
               try {
                 if (useHttpBridgeWsOnly) {
-                  await connection[setT](hybridTransportModule, [store.wispurl, store.bridgeurl]);
-                  log('transport set: Wisp + HTTP bridge fallback for WebSockets', { wisp: store.wispurl, bridge: store.bridgeurl });
+                  await connection[setT](hybridTransportModule, [store.wispurl, store.bridgeurl, useSseWs ? store.ssebridgeurl : '']);
+                  log('transport set: Wisp + ' + (useSseWs ? 'SSE WebSocket bridge fallback' : 'HTTP bridge fallback for WebSockets'), { wisp: store.wispurl, bridge: store.bridgeurl, sseBridge: useSseWs ? store.ssebridgeurl : null });
                 } else {
-                  await connection[setT](bridgeTransportModule, [store.bridgeurl]);
-                  log('transport set: HTTP bridge fallback', store.bridgeurl);
+                  await connection[setT](bridgeTransportModule, [store.bridgeurl, useSseWs ? store.ssebridgeurl : '']);
+                  log('transport set: HTTP bridge' + (useSseWs ? ' + SSE WebSocket' : '') + ' fallback', { bridge: store.bridgeurl, sseBridge: useSseWs ? store.ssebridgeurl : null });
                 }
                 transportReady = true;
                 return;
