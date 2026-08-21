@@ -1596,20 +1596,28 @@ var EpoxyTransport = class {
   async request(remote, method, body, headers, signal) {
     if (body instanceof Blob) body = await body.arrayBuffer();
     const requestId = `wisp-http-${++wispRequestSequence}`;
+    const requestBody = wispBodyDetails(body, headers);
     wispLog('request.start', {
       requestId,
       method,
       url: wispUrl(remote.href),
-      body: wispBodyDetails(body, headers)
+      bodyType: requestBody.type,
+      bodyBytes: requestBody.bytes,
+      bodyContentLength: requestBody.contentLength,
+      bodyStreamed: requestBody.streamed
     });
     try {
       let res = await this.client.fetch(remote.href, { method, body, headers, redirect: 'manual' });
+      const responseBody = wispBodyDetails(res.body, res.rawHeaders);
       wispLog('request.complete', {
         requestId,
         status: res.status,
         statusText: res.statusText,
         url: wispUrl(remote.href),
-        response: wispBodyDetails(res.body, res.rawHeaders),
+        responseType: responseBody.type,
+        responseBytes: responseBody.bytes,
+        responseContentLength: responseBody.contentLength,
+        responseStreamed: responseBody.streamed,
         headers: {
           contentType: wispHeaderValue(res.rawHeaders, 'content-type') || null,
           contentLength: wispHeaderValue(res.rawHeaders, 'content-length') || null,
