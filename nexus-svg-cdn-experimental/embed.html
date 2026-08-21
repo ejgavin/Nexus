@@ -481,6 +481,13 @@
       if (referrerUrl.origin === location.origin) referrerQuery = referrerUrl.searchParams;
     }
   } catch (_) {}
+  var noTransportSelection = !transportQuery.has('httpbridge') &&
+    !transportQuery.has('httpbridgews') &&
+    !transportQuery.has('transport') &&
+    (!referrerQuery || (!referrerQuery.has('httpbridge') &&
+      !referrerQuery.has('httpbridgews') && !referrerQuery.has('transport')));
+  var noSseSelection = !transportQuery.has('ssews') &&
+    (!referrerQuery || !referrerQuery.has('ssews'));
   var useHttpBridge = transportQuery.get('httpbridge') === '1' ||
     transportQuery.get('httpbridgews') === '1' ||
     transportQuery.get('ssews') === '1' ||
@@ -497,13 +504,11 @@
     transportQuery.get('transport') === 'hybrid' ||
     (referrerQuery && (referrerQuery.get('httpbridgews') === '1' || referrerQuery.get('transport') === 'hybrid')) ||
     ((!transportQuery.has('httpbridge') && !transportQuery.has('httpbridgews') && !transportQuery.has('transport')) &&
-      (!referrerQuery || (!referrerQuery.has('httpbridge') && !referrerQuery.has('httpbridgews') && !referrerQuery.has('transport'))) &&
-      localStorage.getItem('nexus-httpbridge-ws-setting') === '1') ||
+      noTransportSelection && localStorage.getItem('nexus-httpbridge-ws-setting') !== '0') ||
     (typeof _CONFIG !== 'undefined' && _CONFIG.transport === 'hybrid'));
   var useSseWs = useHttpBridge && (transportQuery.get('ssews') === '1' ||
     (referrerQuery && referrerQuery.get('ssews') === '1') ||
-    ((!transportQuery.has('ssews') && (!referrerQuery || !referrerQuery.has('ssews'))) &&
-      localStorage.getItem('nexus-sse-ws-setting') === '1'));
+    (noSseSelection && localStorage.getItem('nexus-sse-ws-setting') !== '0'));
   if (useHttpBridge) {
     if (!transportQuery.has('httpbridge') && !transportQuery.has('httpbridgews') && !transportQuery.has('ssews') && !transportQuery.has('transport')) {
       try {

@@ -37,15 +37,16 @@
     try {
       window.__nexusMuxHandshake = new BareMux.BareMuxConnection(NEXUS_BASE + 'm4thx/worker.js');
       var rootQuery = new URLSearchParams(location.search);
+      var rootNoTransportSelection = !rootQuery.has('httpbridge') && !rootQuery.has('httpbridgews') && !rootQuery.has('transport');
+      var rootNoSseSelection = !rootQuery.has('ssews');
       var rootHttpBridge = rootQuery.get('httpbridge') === '1' || rootQuery.get('httpbridgews') === '1' || rootQuery.get('ssews') === '1' ||
         rootQuery.get('transport') === 'httpbridge' || rootQuery.get('transport') === 'hybrid' ||
         (rootQuery.get('transport') !== 'wisp' && localStorage.getItem('nexus-httpbridge-setting') !== '0');
       var rootWsOnly = rootHttpBridge && (rootQuery.get('httpbridgews') === '1' ||
         rootQuery.get('transport') === 'hybrid' ||
-        ((!rootQuery.has('httpbridge') && !rootQuery.has('httpbridgews') && !rootQuery.has('transport')) &&
-          localStorage.getItem('nexus-httpbridge-ws-setting') === '1'));
+        (rootNoTransportSelection && localStorage.getItem('nexus-httpbridge-ws-setting') !== '0'));
       var rootSseWs = rootHttpBridge && (rootQuery.get('ssews') === '1' ||
-        (!rootQuery.has('ssews') && localStorage.getItem('nexus-sse-ws-setting') === '1'));
+        (rootNoSseSelection && localStorage.getItem('nexus-sse-ws-setting') !== '0'));
       var rootTransport = rootWsOnly ? NEXUS_BASE + 'hybrid/index.mjs' : (rootHttpBridge ? NEXUS_BASE + 'httpbridge/index.mjs' : NEXUS_BASE + 'm4thx/index.mjs');
       var rootArgs = rootWsOnly ? [_CONFIG.wispurl, _CONFIG.bridgeurl, rootSseWs ? _CONFIG.ssebridgeurl : ''] : (rootHttpBridge ? [_CONFIG.bridgeurl, rootSseWs ? _CONFIG.ssebridgeurl : ''] : [_CONFIG.bareurl]);
       window.__nexusMuxTransportReady = Promise.resolve(window.__nexusSwMigration).then(function () {
@@ -482,6 +483,8 @@
   var nextTabId = 1;
 
   var query = new URLSearchParams(location.search);
+  var noTransportSelection = !query.has('httpbridge') && !query.has('httpbridgews') && !query.has('transport');
+  var noSseSelection = !query.has('ssews');
   var restrictParam = query.get('restrict') || query.get('domain_restrict') || '';
   // Preserve transport flags when the parent creates a fresh embed frame.
   var useHttpBridge = query.get('httpbridge') === '1' ||
@@ -493,9 +496,9 @@
   var useHttpBridgeWsOnly = useHttpBridge && (
     query.get('httpbridgews') === '1' ||
     query.get('transport') === 'hybrid' ||
-    localStorage.getItem('nexus-httpbridge-ws-setting') === '1');
+    (noTransportSelection && localStorage.getItem('nexus-httpbridge-ws-setting') !== '0'));
   var useSseWs = useHttpBridge && (query.get('ssews') === '1' ||
-    (!query.has('ssews') && localStorage.getItem('nexus-sse-ws-setting') === '1'));
+    (noSseSelection && localStorage.getItem('nexus-sse-ws-setting') !== '0'));
   var adblockEnabled = query.get('adblock') !== '0' && localStorage.getItem('nexus-adblock-setting') !== '0';
   var socksEnabled = query.get('socks') === '1' || localStorage.getItem('nexus-socks-setting') === '1';
   var cleanParam = query.get('clean') || query.get('remove') || query.get('remove_element');
@@ -1021,18 +1024,18 @@
   };
   document.getElementById('settings-reset').onclick = function () {
     useHttpBridgeInput.checked = true;
-    useHttpBridgeWsOnlyInput.checked = false;
-    useSseWsInput.checked = false;
+    useHttpBridgeWsOnlyInput.checked = true;
+    useSseWsInput.checked = true;
     useHttpBridge = true;
-    useHttpBridgeWsOnly = false;
-    useSseWs = false;
+    useHttpBridgeWsOnly = true;
+    useSseWs = true;
     adblockEnabled = true;
     useAdblockInput.checked = true;
     socksEnabled = false;
     useSocksInput.checked = false;
     try { localStorage.setItem('nexus-httpbridge-setting', '1'); } catch (_) {}
-    try { localStorage.setItem('nexus-httpbridge-ws-setting', '0'); } catch (_) {}
-    try { localStorage.setItem('nexus-sse-ws-setting', '0'); } catch (_) {}
+    try { localStorage.setItem('nexus-httpbridge-ws-setting', '1'); } catch (_) {}
+    try { localStorage.setItem('nexus-sse-ws-setting', '1'); } catch (_) {}
     try { localStorage.setItem('nexus-adblock-setting', '1'); } catch (_) {}
     try { localStorage.setItem('nexus-socks-setting', '0'); } catch (_) {}
     settingsPanel.classList.remove('open');
