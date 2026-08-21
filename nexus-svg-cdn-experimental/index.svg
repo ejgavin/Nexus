@@ -27,6 +27,10 @@
 
           const base = new URL('./', location.href);
           const staticIndex = new URL('index.html?svg-entry=1', base);
+          // SVG foreignObject scripts do not always resolve location.href like
+          // a normal HTML document. Pass the actual copied-app folder into the
+          // unchanged Nexus landing page before its scripts start.
+          window.__NEXUS_SVG_BASE = new URL('./', staticIndex.href).pathname;
           const runScript = (source, sourceBase) => new Promise((resolve, reject) => {
             const script = document.createElement('script');
             if (source.src) script.src = new URL(source.src, sourceBase).href;
