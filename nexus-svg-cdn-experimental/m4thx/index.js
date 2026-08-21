@@ -60,16 +60,15 @@
         o.addEventListener('message', async (t) => {
           if ('getPort' === t.data.type && t.data.port) {
             console.log('%c[Nexus:mux]', 'color:#34d399;font-weight:700', 'service worker requested a SharedWorker port');
-            // Never return a worker before the root page has selected its
-            // remote transport; otherwise its first request has no client.
+            // Return the port immediately. Waiting for the page-side
+            // transport promise here can deadlock: the transport setup and
+            // the service-worker request both use this SharedWorker. The
+            // worker can safely queue its first message until the transport
+            // is selected, while refusing the port makes every retry loop
+            // forever and prevents the SW config acknowledgment from ever
+            // arriving.
             if (globalThis.__nexusMuxTransportReady) {
-              try {
-                await globalThis.__nexusMuxTransportReady;
-                console.log('%c[Nexus:mux]', 'color:#34d399;font-weight:700', 'transport ready; returning configured port');
-              } catch (error) {
-                console.error('%c[Nexus:mux]', 'color:#ef4444;font-weight:700', 'transport setup failed before port handoff', error);
-                return;
-              }
+              console.debug('%c[Nexus:mux]', 'color:#facc15;font-weight:700', 'returning SharedWorker port without waiting for transport setup');
             }
             const a = new r(e, 'bare-mux-worker');
             s.call(t.data.port, a.port, [a.port]);
