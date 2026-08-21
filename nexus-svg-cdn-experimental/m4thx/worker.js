@@ -2,6 +2,11 @@
   'use strict';
   const e = MessagePort.prototype.postMessage;
   let t = null;
+  const debugStorage = globalThis.localStorage;
+  function muxDebug(...args) {
+    try { if (debugStorage?.getItem('nexus-scramjet-logs') !== '1') return; } catch (_) { return; }
+    console.debug(...args);
+  }
   function a(e, t, a) {
     (console.error(`error while processing '${a}': `, t), e.postMessage({ type: 'error', error: t }));
   }
@@ -58,7 +63,7 @@
               [a, n] = await e();
             ((s = new a(...i.client.args)), (o = n));
           }
-          (console.log('set transport to ', s, o), e.call(l, { type: 'set' }));
+          (muxDebug('set transport to ', s, o), e.call(l, { type: 'set' }));
         } catch (e) {
           a(l, e, 'set');
         }
@@ -110,6 +115,6 @@
     (self.onconnect = (e) => {
       l(e.ports[0]);
     }),
-    console.debug('bare-mux: running v2.1.7 (build c56d286)'));
+    muxDebug('bare-mux: running v2.1.7 (build c56d286'));
 })();
 //# sourceMappingURL=worker.js.map

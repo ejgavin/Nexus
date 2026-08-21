@@ -6,11 +6,11 @@ if (navigator.userAgent.includes('Firefox')) {
 }
 
 // ── debug logger ─────────────────────────────────────────────────────────
-// Note: localStorage isn't available in a service worker, so this can't
-// share the page's on/off toggle directly — it's just always on. Filter the
-// console by "[Nexus:sw]" to isolate these from the parent/embed logs.
+// The page sends the Scramjet flag with its config. Keep worker diagnostics
+// quiet until that flag is explicitly enabled in Settings > Advanced.
+var NEXUS_VERBOSE_LOGS = false;
 var L = (function () {
-  function log(msg)  { console.log('%c[Nexus:sw]', 'color:#a78bfa;font-weight:700', msg, arguments.length > 1 ? Array.prototype.slice.call(arguments, 1) : ''); }
+  function log(msg)  { if (!NEXUS_VERBOSE_LOGS) return; console.log('%c[Nexus:sw]', 'color:#a78bfa;font-weight:700', msg, arguments.length > 1 ? Array.prototype.slice.call(arguments, 1) : ''); }
   function warn(msg) { console.warn('%c[Nexus:sw]', 'color:#f97316;font-weight:700', msg, arguments.length > 1 ? Array.prototype.slice.call(arguments, 1) : ''); }
   function err(msg)  { console.error('%c[Nexus:sw]', 'color:#ef4444;font-weight:700', msg, arguments.length > 1 ? Array.prototype.slice.call(arguments, 1) : ''); }
   return { log: log, warn: warn, err: err };
@@ -131,8 +131,8 @@ async function quietScramjetRetryWarnings(response, url) {
   try {
     var source = await response.clone().text();
     var quiet = source
-      .replace('console.warn("bare-mux: failed to get a bare-mux SharedWorker MessagePort within 1s, retrying")', 'console.debug("[Nexus:mux] SharedWorker port not ready after 1s; retrying")')
-      .replace('console.warn("bare-mux: Failed to get a ping response from the worker within 1.5s. Assuming port is dead.")', 'console.debug("[Nexus:mux] worker ping timed out; recreating the port")');
+      .replace('console.warn("bare-mux: failed to get a bare-mux SharedWorker MessagePort within 1s, retrying")', '(typeof localStorage !== "undefined" && localStorage.getItem("nexus-scramjet-logs") === "1") && console.debug("[Nexus:mux] SharedWorker port not ready after 1s; retrying")')
+      .replace('console.warn("bare-mux: Failed to get a ping response from the worker within 1.5s. Assuming port is dead.")', '(typeof localStorage !== "undefined" && localStorage.getItem("nexus-scramjet-logs") === "1") && console.debug("[Nexus:mux] worker ping timed out; recreating the port")');
     if (quiet === source) return response;
     var headers = new Headers(response.headers);
     headers.delete('content-length');
@@ -249,6 +249,7 @@ async function applyConfigMessage(data) {
   _engine.config = undefined;
   _hydrated = false;
   await ensureConfig();
+  NEXUS_VERBOSE_LOGS = !!(_engine.config && _engine.config.flags && _engine.config.flags.rewriterLogs);
 }
 
 function unwrapAppUrl(pathname) {
@@ -310,14 +311,6 @@ async function preserveRequestBody(event) {
   var request = event.request;
   var method = String(request.method || 'GET').toUpperCase();
   var transferable = requestBodyStreamsTransfer();
-  if (method !== 'GET' && method !== 'HEAD') {
-    L.log('request body observed at SW ingress', {
-      method,
-      hasBody: !!request.body,
-      bodyType: request.body?.constructor?.name || null,
-      transferableStreams: transferable
-    });
-  }
   if (!request.body || method === 'GET' || method === 'HEAD' || transferable) return event;
   try {
     // Firefox and some embedded browsers cannot transfer a ReadableStream
@@ -325,11 +318,6 @@ async function preserveRequestBody(event) {
     // the configured Wisp/HTTP transport as transferable bytes.
     var bytes = await new Response(request.body).arrayBuffer();
     var rebuilt = new Request(request, { body: bytes, duplex: 'half' });
-    L.log('buffered non-transferable request body', {
-      method,
-      bytes: bytes.byteLength,
-      bodyType: request.body.constructor?.name || 'ReadableStream'
-    });
     return new FetchEvent('fetch', { request: rebuilt });
   } catch (error) {
     L.err('failed to preserve request body; continuing with original request', {
@@ -587,7 +575,6 @@ self.addEventListener('message', function (msg) {
 
 _engine.addEventListener('request', function (e) {
   if (_engine.config && _engine.config.adblockEnabled && e.url && _isBlockedAdRequest(e.url.href)) {
-    L.log('built-in ad blocker blocked request', e.url.href);
     var blockedHeaders = { 'content-type': 'text/plain' };
     // A 204 response cannot have a body. Passing an empty string makes
     // Chromium throw and aborts the service-worker fetch handler.

@@ -44,6 +44,27 @@ function safeUrl(value) {
   }
 }
 
+function normalizeBridgeTarget(value) {
+  let target = String(value?.href || value || '').trim();
+  const marker = '/math/';
+  const markerIndex = target.indexOf(marker);
+
+  // Scramjet normally gives the transport the decoded remote URL, but a
+  // leaked or stale navigation can hand it the wrapper URL instead. Decode
+  // only the wrapper payload so encoded slashes remain intact everywhere else.
+  if (markerIndex !== -1) target = target.slice(markerIndex + marker.length);
+
+  for (let i = 0; i < 8; i += 1) {
+    if (!/^https?(?:%3A|:\/)/i.test(target)) break;
+    let decoded;
+    try { decoded = decodeURIComponent(target); } catch (_) { break; }
+    if (decoded === target) break;
+    target = decoded;
+  }
+
+  return target.replace(/^(https?):\/(?!\/)/i, '$1://');
+}
+
 function errorDetails(error) {
   return {
     name: error?.name || 'Error',
@@ -66,6 +87,7 @@ function dataDetails(value) {
 }
 
 function bridgeLog(message, details) {
+  try { if (globalThis.localStorage?.getItem('nexus-scramjet-logs') !== '1') return; } catch (_) { return; }
   console.log('%c[Nexus:httpbridge]', 'color:#34d399;font-weight:700', new Date().toISOString(), message, details || '');
 }
 
@@ -248,9 +270,10 @@ export default class HttpBridgeTransport {
 
   async request(remote, method, body, headers, signal) {
     const bytes = await toBytes(body);
-    bridgeLog('HTTP request start', { method, url: safeUrl(remote.href), bodyBytes: bytes.length, headerCount: Object.keys(headerObject(headers)).length });
+    const targetUrl = normalizeBridgeTarget(remote);
+    bridgeLog('HTTP request start', { method, url: safeUrl(targetUrl), bodyBytes: bytes.length, headerCount: Object.keys(headerObject(headers)).length });
     const requestBody = JSON.stringify({
-      url: remote.href,
+      url: targetUrl,
       method,
       headers: headerObject(headers),
       body: bytes.length ? toBase64(bytes) : '',
@@ -262,11 +285,11 @@ export default class HttpBridgeTransport {
       signal,
     }, 'HTTP bridge request', {
       method,
-      url: safeUrl(remote.href),
+      url: safeUrl(targetUrl),
     });
     if (!response.ok) {
       const message = result && typeof result.error === 'string' ? result.error : `HTTP bridge request failed (${response.status})`;
-      bridgeWarn('HTTP request failed', { method, url: safeUrl(remote.href), status: response.status, error: message });
+      bridgeWarn('HTTP request failed', { method, url: safeUrl(targetUrl), status: response.status, error: message });
       throw new Error(message);
     }
     if (!result || typeof result !== 'object') {
@@ -282,7 +305,7 @@ export default class HttpBridgeTransport {
       statusText: result.statusText,
       headers: result.headers,
     });
-    bridgeLog('HTTP request complete', { method, url: safeUrl(remote.href), status: resultResponse.status, bodyBytes: resultBytes.length });
+    bridgeLog('HTTP request complete', { method, url: safeUrl(targetUrl), status: resultResponse.status, bodyBytes: resultBytes.length });
     return {
       body: noBodyStatus ? null : resultBytes.buffer,
       headers: result.headers || {},
@@ -292,6 +315,7 @@ export default class HttpBridgeTransport {
   }
 
   connect(url, protocols, requestHeaders, onopen, onmessage, onclose, onerror) {
+    const targetUrl = normalizeBridgeTarget(url);
     const state = {
       id: `client-${Date.now().toString(36)}-${++bridgeSocketSequence}`,
       upstreamId: null,
@@ -309,20 +333,20 @@ export default class HttpBridgeTransport {
       try {
         const socketBase = this.websocketBase;
         const websocketMode = socketBase !== this.base ? 'SSE WebSocket bridge' : 'HTTP bridge event stream';
-        bridgeLog('WebSocket bridge lifecycle: open.start', { id: state.id, url: safeUrl(url.href), protocols: protocols || [], headerCount: Object.keys(headerObject(requestHeaders)).length, websocketMode, endpoint: safeUrl(socketBase) });
+        bridgeLog('WebSocket bridge lifecycle: open.start', { id: state.id, url: safeUrl(targetUrl), protocols: protocols || [], headerCount: Object.keys(headerObject(requestHeaders)).length, websocketMode, endpoint: safeUrl(socketBase) });
         const { response: openResponse, value: opened } = await fetchBridgeJson(`${socketBase}/open`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: url.href, protocols }),
+          body: JSON.stringify({ url: targetUrl, protocols }),
           signal: state.abort.signal,
         }, 'HTTP bridge WebSocket open', {
           id: state.id,
-          url: safeUrl(url.href),
+          url: safeUrl(targetUrl),
         });
         bridgeLog('WebSocket bridge lifecycle: open.response', { id: state.id, status: openResponse.status, ok: openResponse.ok, contentType: openResponse.headers.get('content-type') || '' });
         if (!openResponse.ok) {
           const message = opened && typeof opened.error === 'string' ? opened.error : `HTTP bridge open failed (${openResponse.status})`;
-          bridgeWarn('WebSocket bridge lifecycle: open.rejected', { id: state.id, url: safeUrl(url.href), status: openResponse.status, error: message });
+          bridgeWarn('WebSocket bridge lifecycle: open.rejected', { id: state.id, url: safeUrl(targetUrl), status: openResponse.status, error: message });
           throw new Error(message);
         }
         if (!opened || typeof opened !== 'object' || !opened.id || !opened.events) {

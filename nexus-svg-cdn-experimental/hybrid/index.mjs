@@ -1,7 +1,7 @@
 // Hybrid transport: Wisp handles normal HTTP requests while the HTTP bridge
 // handles WebSocket connections.
 import WispTransport from '../e7px/index.mjs';
-import HttpBridgeTransport from '../httpbridge/index.mjs';
+import HttpBridgeTransport from '../httpbridge/index.mjs?build=svg-cdn-routefix-1';
 
 let hybridRequestSequence = 0;
 let hybridSocketSequence = 0;
@@ -50,6 +50,7 @@ function looksLikeTransportFailure(response, method) {
 }
 
 function hybridLog(message, details) {
+  try { if (globalThis.localStorage?.getItem('nexus-scramjet-logs') !== '1') return; } catch (_) { return; }
   console.log('%c[Nexus:hybrid]', 'color:#34d399;font-weight:700', new Date().toISOString(), message, details || '');
 }
 

@@ -66,6 +66,7 @@ function dataDetails(value) {
 }
 
 function bridgeLog(message, details) {
+  try { if (globalThis.localStorage?.getItem('nexus-scramjet-logs') !== '1') return; } catch (_) { return; }
   console.log('%c[Nexus:httpbridge]', 'color:#34d399;font-weight:700', new Date().toISOString(), message, details || '');
 }
 

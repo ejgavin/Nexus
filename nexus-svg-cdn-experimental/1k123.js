@@ -6,11 +6,11 @@ if (navigator.userAgent.includes('Firefox')) {
 }
 
 // ── debug logger ─────────────────────────────────────────────────────────
-// Note: localStorage isn't available in a service worker, so this can't
-// share the page's on/off toggle directly — it's just always on. Filter the
-// console by "[Nexus:sw]" to isolate these from the parent/embed logs.
+// The page sends the Scramjet flag with its config. Keep worker diagnostics
+// quiet until that flag is explicitly enabled in Settings > Advanced.
+var NEXUS_VERBOSE_LOGS = false;
 var L = (function () {
-  function log(msg)  { console.log('%c[Nexus:sw]', 'color:#a78bfa;font-weight:700', msg, arguments.length > 1 ? Array.prototype.slice.call(arguments, 1) : ''); }
+  function log(msg)  { if (!NEXUS_VERBOSE_LOGS) return; console.log('%c[Nexus:sw]', 'color:#a78bfa;font-weight:700', msg, arguments.length > 1 ? Array.prototype.slice.call(arguments, 1) : ''); }
   function warn(msg) { console.warn('%c[Nexus:sw]', 'color:#f97316;font-weight:700', msg, arguments.length > 1 ? Array.prototype.slice.call(arguments, 1) : ''); }
   function err(msg)  { console.error('%c[Nexus:sw]', 'color:#ef4444;font-weight:700', msg, arguments.length > 1 ? Array.prototype.slice.call(arguments, 1) : ''); }
   return { log: log, warn: warn, err: err };
@@ -136,8 +136,8 @@ async function quietScramjetRetryWarnings(response, url) {
   try {
     var source = await response.clone().text();
     var quiet = source
-      .replace('console.warn("bare-mux: failed to get a bare-mux SharedWorker MessagePort within 1s, retrying")', 'console.debug("[Nexus:mux] SharedWorker port not ready after 1s; retrying")')
-      .replace('console.warn("bare-mux: Failed to get a ping response from the worker within 1.5s. Assuming port is dead.")', 'console.debug("[Nexus:mux] worker ping timed out; recreating the port")');
+      .replace('console.warn("bare-mux: failed to get a bare-mux SharedWorker MessagePort within 1s, retrying")', '(typeof localStorage !== "undefined" && localStorage.getItem("nexus-scramjet-logs") === "1") && console.debug("[Nexus:mux] SharedWorker port not ready after 1s; retrying")')
+      .replace('console.warn("bare-mux: Failed to get a ping response from the worker within 1.5s. Assuming port is dead.")', '(typeof localStorage !== "undefined" && localStorage.getItem("nexus-scramjet-logs") === "1") && console.debug("[Nexus:mux] worker ping timed out; recreating the port")');
     if (quiet === source) return response;
     var headers = new Headers(response.headers);
     headers.delete('content-length');
@@ -254,6 +254,13 @@ async function applyConfigMessage(data) {
   _engine.config = undefined;
   _hydrated = false;
   await ensureConfig();
+  NEXUS_VERBOSE_LOGS = !!(_engine.config && _engine.config.flags && _engine.config.flags.rewriterLogs);
+}
+
+function normalizeDecodedTarget(value) {
+  // A malformed wrapper can leave the scheme as `https:/host` after one
+  // decode pass. Restore the second slash before URL parsing or re-encoding.
+  return String(value || '').replace(/^(https?):\/(?!\/)/i, '$1://');
 }
 
 function unwrapAppUrl(pathname) {
@@ -264,9 +271,11 @@ function unwrapAppUrl(pathname) {
   // already-proxied URL as if it were a fresh absolute URL to wrap.
   // Peels off nested layers until it reaches the real destination URL.
   if (pathname.indexOf(_pref) !== 0) return null;
+  var rawDecoded;
   var decoded;
   try {
-    decoded = decodeURIComponent(pathname.slice(_pref.length));
+    rawDecoded = decodeURIComponent(pathname.slice(_pref.length));
+    decoded = normalizeDecodedTarget(rawDecoded);
   } catch (e) {
     return null;
   }
@@ -280,7 +289,7 @@ function unwrapAppUrl(pathname) {
     }
     if (inner.origin === self.location.origin && inner.pathname.indexOf(_pref) === 0) {
       try {
-        current = decodeURIComponent(inner.pathname.slice(_pref.length));
+        current = normalizeDecodedTarget(decodeURIComponent(inner.pathname.slice(_pref.length)));
       } catch (e) {
         break;
       }
@@ -288,7 +297,7 @@ function unwrapAppUrl(pathname) {
       break;
     }
   }
-  return current !== decoded ? current : null;
+  return current !== decoded || decoded !== rawDecoded ? current : null;
 }
 
 var _requestBodyStreamsTransfer = null;
@@ -315,14 +324,6 @@ async function preserveRequestBody(event) {
   var request = event.request;
   var method = String(request.method || 'GET').toUpperCase();
   var transferable = requestBodyStreamsTransfer();
-  if (method !== 'GET' && method !== 'HEAD') {
-    L.log('request body observed at SW ingress', {
-      method,
-      hasBody: !!request.body,
-      bodyType: request.body?.constructor?.name || null,
-      transferableStreams: transferable
-    });
-  }
   if (!request.body || method === 'GET' || method === 'HEAD' || transferable) return event;
   try {
     // Firefox and some embedded browsers cannot transfer a ReadableStream
@@ -330,11 +331,6 @@ async function preserveRequestBody(event) {
     // the configured Wisp/HTTP transport as transferable bytes.
     var bytes = await new Response(request.body).arrayBuffer();
     var rebuilt = new Request(request, { body: bytes, duplex: 'half' });
-    L.log('buffered non-transferable request body', {
-      method,
-      bytes: bytes.byteLength,
-      bodyType: request.body.constructor?.name || 'ReadableStream'
-    });
     return new FetchEvent('fetch', { request: rebuilt });
   } catch (error) {
     L.err('failed to preserve request body; continuing with original request', {
@@ -365,6 +361,7 @@ function decodeApplicationTarget(pathname, prefix) {
   var current = pathname.slice(prefix.length);
   for (var i = 0; i < 8; i++) {
     try { current = decodeURIComponent(current); } catch (_) { return null; }
+    current = normalizeDecodedTarget(current);
     if (/^https?:\/\//i.test(current)) {
       try {
         var target = new URL(current);
@@ -409,7 +406,7 @@ async function handleRequest(event) {
   // route name changes.
   if (url.origin === self.location.origin && url.pathname.indexOf(_legacyPref) === 0) {
     try {
-      var legacyTarget = decodeURIComponent(url.pathname.slice(_legacyPref.length));
+      var legacyTarget = normalizeDecodedTarget(decodeURIComponent(url.pathname.slice(_legacyPref.length)));
       var legacyDestination = self.location.origin + _pref + encodeURIComponent(legacyTarget) + url.search;
       return Response.redirect(legacyDestination, 302);
     } catch (_) {}
@@ -445,7 +442,7 @@ async function handleRequest(event) {
       if (u.origin !== self.location.origin) return null;
       if (u.pathname.indexOf(_pref) !== 0) return null;
       try {
-        var decoded = decodeURIComponent(u.pathname.slice(_pref.length));
+        var decoded = normalizeDecodedTarget(decodeURIComponent(u.pathname.slice(_pref.length)));
         var realOrigin = new URL(decoded).origin;
         if (realOrigin === self.location.origin) return null; // still self-referencing — reject
         return decoded;
@@ -643,7 +640,6 @@ self.addEventListener('message', function (msg) {
 
 _engine.addEventListener('request', function (e) {
   if (_engine.config && _engine.config.adblockEnabled && e.url && _isBlockedAdRequest(e.url.href)) {
-    L.log('built-in ad blocker blocked request', e.url.href);
     var blockedHeaders = { 'content-type': 'text/plain' };
     // A 204 response cannot have a body. Passing an empty string makes
     // Chromium throw and aborts the service-worker fetch handler.

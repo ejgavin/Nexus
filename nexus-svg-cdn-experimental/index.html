@@ -13,12 +13,12 @@
     // page after a Netlify deployment has published math-v2.
     window.__nexusSwMigration = (async function () {
       try {
-        var marker = 'nexus-sw-migration-svg-bodyfix-1';
+        var marker = 'nexus-sw-migration-svg-bodyfix-3';
         if (sessionStorage.getItem(marker) === '1') return;
         var registrations = await navigator.serviceWorker.getRegistrations();
         var stale = registrations.filter(function (registration) {
           var worker = registration.active || registration.waiting || registration.installing;
-          return worker && /\/1k123\.js(?:\?|$)/.test(worker.scriptURL) && !/build=svg-cdn-bodyfix-1(?:&|$)/.test(worker.scriptURL);
+          return worker && /\/1k123\.js(?:\?|$)/.test(worker.scriptURL) && !/build=svg-cdn-bodyfix-3(?:&|$)/.test(worker.scriptURL);
         });
         if (!stale.length) return;
         sessionStorage.setItem(marker, '1');
@@ -47,7 +47,7 @@
         (rootNoTransportSelection && localStorage.getItem('nexus-httpbridge-ws-setting') !== '0'));
       var rootSseWs = rootHttpBridge && (rootQuery.get('ssews') === '1' ||
         (rootNoSseSelection && localStorage.getItem('nexus-sse-ws-setting') !== '0'));
-      var rootTransport = rootWsOnly ? NEXUS_BASE + 'hybrid/index.mjs' : (rootHttpBridge ? NEXUS_BASE + 'httpbridge/index.mjs' : NEXUS_BASE + 'm4thx/index.mjs');
+      var rootTransport = rootWsOnly ? NEXUS_BASE + 'hybrid/index.mjs?build=svg-cdn-routefix-2' : (rootHttpBridge ? NEXUS_BASE + 'httpbridge/index.mjs?build=svg-cdn-routefix-1' : NEXUS_BASE + 'm4thx/index.mjs');
       var rootArgs = rootWsOnly ? [_CONFIG.wispurl, _CONFIG.bridgeurl, rootSseWs ? _CONFIG.ssebridgeurl : ''] : (rootHttpBridge ? [_CONFIG.bridgeurl, rootSseWs ? _CONFIG.ssebridgeurl : ''] : [_CONFIG.bareurl]);
       window.__nexusMuxTransportReady = Promise.resolve(window.__nexusSwMigration).then(function () {
         return window.__nexusMuxHandshake.setTransport(rootTransport, rootArgs);
@@ -234,7 +234,7 @@
     #fw{inset:16px 22px 16px 22px;border:1px solid var(--b);border-radius:16px;overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.28)}#fr{background:#fff}
     #sb{height:28px;padding:0 22px;background:rgba(5,14,25,.88);border-top-color:var(--b)}#smsg,#ssec{font-size:10px}.sdot{background:var(--blhi)}
     #lock-panel,#settings-panel{background:#102238;border-color:rgba(165,243,223,.18);border-radius:16px;box-shadow:0 18px 50px rgba(0,0,0,.42)}#lock-panel{width:310px}#lock-panel h4,#settings-panel h4{font-size:13px}#lock-panel p,#settings-panel p{color:#91a9ae;line-height:1.6}
-    #settings-wrap{position:relative;flex-shrink:0}#settings-panel{position:absolute;top:calc(100% + 8px);right:0;width:330px;padding:16px;z-index:20;opacity:0;pointer-events:none;transform:translateY(-6px);transition:opacity .2s,transform .2s}#settings-panel.open{opacity:1;pointer-events:all;transform:translateY(0)}#settings-panel h4{margin-bottom:5px;color:#e9f4f1}#settings-panel p{font-size:11px;margin-bottom:12px}.setting-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--b);font-size:12px}.setting-row input[type=checkbox]{accent-color:#69c6b8;width:16px;height:16px}.setting-row label{cursor:pointer}.setting-label{display:flex;flex-direction:column;gap:2px}.setting-label small{font-size:10px;color:#78929a}.settings-input{width:100%;height:34px;padding:0 10px;background:#0c1a2c;border:1px solid var(--b);border-radius:8px;color:var(--tx);font:12px inherit;outline:none}.settings-input:focus{border-color:var(--bhi)}#settings-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:13px}.settings-action{height:30px;padding:0 12px;border-radius:8px;border:1px solid var(--b);background:transparent;color:var(--txm);cursor:pointer}.settings-action.primary{border-color:transparent;background:#69c6b8;color:#08201e;font-weight:700}
+    #settings-wrap{position:relative;flex-shrink:0}#settings-panel{position:absolute;top:calc(100% + 8px);right:0;width:330px;padding:16px;z-index:20;opacity:0;pointer-events:none;transform:translateY(-6px);transition:opacity .2s,transform .2s}#settings-panel.open{opacity:1;pointer-events:all;transform:translateY(0)}#settings-panel h4{margin-bottom:5px;color:#e9f4f1}#settings-panel p{font-size:11px;margin-bottom:12px}.setting-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--b);font-size:12px}.setting-row input[type=checkbox]{accent-color:#69c6b8;width:16px;height:16px}.setting-row label{cursor:pointer}.setting-label{display:flex;flex-direction:column;gap:2px}.setting-label small{font-size:10px;color:#78929a}.settings-advanced{margin-top:10px;border-top:1px solid var(--b)}.settings-advanced summary{padding:10px 0 2px;color:var(--txm);cursor:pointer;font-size:11px;list-style:none}.settings-advanced summary::-webkit-details-marker{display:none}.settings-advanced summary::before{content:'▸';display:inline-block;margin-right:6px;transition:transform .2s}.settings-advanced[open] summary::before{transform:rotate(90deg)}.settings-input{width:100%;height:34px;padding:0 10px;background:#0c1a2c;border:1px solid var(--b);border-radius:8px;color:var(--tx);font:12px inherit;outline:none}.settings-input:focus{border-color:var(--bhi)}#settings-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:13px}.settings-action{height:30px;padding:0 12px;border-radius:8px;border:1px solid var(--b);background:transparent;color:var(--txm);cursor:pointer}.settings-action.primary{border-color:transparent;background:#69c6b8;color:#08201e;font-weight:700}
     @media (max-width:760px){#bar,#tabs,#content,#sb{margin-left:0}.rail{display:none}#bar{padding:0 12px;gap:8px}.logo-txt{display:none}.btns{gap:0}.grid{grid-template-columns:repeat(2,1fr)}#home{padding:40px 20px}.hero{max-width:none}#fw{inset:8px}.ssp,#ssec{display:none}}
 
     /* restrained utility skin: flat surfaces, compact type, no promotional glow */
@@ -354,6 +354,13 @@
             <input id="use-socks" type="checkbox"/>
             <div class="setting-label"><label for="use-socks">Use SOCKS routing</label><small>Ask the backend to route Wisp/Bare traffic through its configured SOCKS route.</small></div>
           </div>
+          <details class="settings-advanced">
+            <summary>Advanced</summary>
+            <div class="setting-row">
+              <input id="use-scramjet-logs" type="checkbox"/>
+              <div class="setting-label"><label for="use-scramjet-logs">Scramjet diagnostics</label><small>Show Scramjet rewriter diagnostics in the browser console. Off by default.</small></div>
+            </div>
+          </details>
           <div id="settings-actions"><button class="settings-action" id="settings-reset">Reset</button><button class="settings-action primary" id="settings-apply">Apply</button></div>
         </div>
       </div>
@@ -477,6 +484,7 @@
   var useSseWsInput = document.getElementById('use-sse-ws');
   var useAdblockInput = document.getElementById('use-adblock');
   var useSocksInput = document.getElementById('use-socks');
+  var useScramjetLogsInput = document.getElementById('use-scramjet-logs');
   var tabList = document.getElementById('tab-list');
   var tabs = [];
   var activeTab = null;
@@ -501,6 +509,8 @@
     (noSseSelection && localStorage.getItem('nexus-sse-ws-setting') !== '0'));
   var adblockEnabled = query.get('adblock') !== '0' && localStorage.getItem('nexus-adblock-setting') !== '0';
   var socksEnabled = query.get('socks') === '1' || localStorage.getItem('nexus-socks-setting') === '1';
+  var scramjetLogs = query.get('scramjetlogs') === '1' ||
+    (query.get('scramjetlogs') !== '0' && localStorage.getItem('nexus-scramjet-logs') === '1');
   var cleanParam = query.get('clean') || query.get('remove') || query.get('remove_element');
   var cleanEnabled = true;
   var cleanSelector = query.get('remove_selector') || query.get('selector') || '';
@@ -511,6 +521,7 @@
   useSseWsInput.disabled = !useHttpBridge;
   useAdblockInput.checked = adblockEnabled;
   useSocksInput.checked = socksEnabled;
+  useScramjetLogsInput.checked = scramjetLogs;
 
   // Whether the CURRENT fr.src instance is a live, message-capable
   // embed.html we can send 'go' commands to, rather than re-deriving this
@@ -923,6 +934,7 @@
       if (useHttpBridge && useSseWs) params.push('ssews=1');
       params.push('adblock=' + (adblockEnabled ? '1' : '0'));
       if (socksEnabled) params.push('socks=1');
+      params.push('scramjetlogs=' + (scramjetLogs ? '1' : '0'));
       if (params.length) src = embedEntry + '?' + params.join('&') + '#' + encodedTarget;
       log('nav() setting fr.src (CDN HTML bootstrap load)', src);
       embedReady = false;
@@ -1013,13 +1025,15 @@
     useSseWs = useHttpBridge && !!useSseWsInput.checked;
     adblockEnabled = !!useAdblockInput.checked;
     socksEnabled = !!useSocksInput.checked;
+    scramjetLogs = !!useScramjetLogsInput.checked;
     try { localStorage.setItem('nexus-httpbridge-setting', useHttpBridge ? '1' : '0'); } catch (_) {}
     try { localStorage.setItem('nexus-httpbridge-ws-setting', useHttpBridgeWsOnly ? '1' : '0'); } catch (_) {}
     try { localStorage.setItem('nexus-sse-ws-setting', useSseWs ? '1' : '0'); } catch (_) {}
     try { localStorage.setItem('nexus-adblock-setting', adblockEnabled ? '1' : '0'); } catch (_) {}
     try { localStorage.setItem('nexus-socks-setting', socksEnabled ? '1' : '0'); } catch (_) {}
+    try { localStorage.setItem('nexus-scramjet-logs', scramjetLogs ? '1' : '0'); } catch (_) {}
     if (activeTab && activeTab.embedReady) cmd('setAdblock', { enabled: adblockEnabled });
-    smsg.textContent = adblockEnabled ? 'Ad blocker enabled' : 'Ad blocker disabled';
+    smsg.textContent = scramjetLogs ? 'Scramjet diagnostics enabled for new pages' : 'Scramjet diagnostics disabled';
     settingsPanel.classList.remove('open');
   };
   document.getElementById('settings-reset').onclick = function () {
@@ -1033,11 +1047,14 @@
     useAdblockInput.checked = true;
     socksEnabled = false;
     useSocksInput.checked = false;
+    scramjetLogs = false;
+    useScramjetLogsInput.checked = false;
     try { localStorage.setItem('nexus-httpbridge-setting', '1'); } catch (_) {}
     try { localStorage.setItem('nexus-httpbridge-ws-setting', '1'); } catch (_) {}
     try { localStorage.setItem('nexus-sse-ws-setting', '1'); } catch (_) {}
     try { localStorage.setItem('nexus-adblock-setting', '1'); } catch (_) {}
     try { localStorage.setItem('nexus-socks-setting', '0'); } catch (_) {}
+    try { localStorage.setItem('nexus-scramjet-logs', '0'); } catch (_) {}
     settingsPanel.classList.remove('open');
   };
   useHttpBridgeInput.addEventListener('change', function () {

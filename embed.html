@@ -13,12 +13,12 @@
     // landing page. The session marker prevents a reload loop.
     window.__nexusSwMigration = (async function () {
       try {
-        var marker = 'nexus-sw-migration-math-v5-bodyfix-1';
+        var marker = 'nexus-sw-migration-math-v5-bodyfix-2';
         if (sessionStorage.getItem(marker) === '1') return;
         var registrations = await navigator.serviceWorker.getRegistrations();
         var stale = registrations.filter(function (registration) {
           var worker = registration.active || registration.waiting || registration.installing;
-          return worker && /\/1k123\.js(?:\?|$)/.test(worker.scriptURL) && !/build=math-v5-bodyfix-1(?:&|$)/.test(worker.scriptURL);
+          return worker && /\/1k123\.js(?:\?|$)/.test(worker.scriptURL) && !/build=math-v5-bodyfix-2(?:&|$)/.test(worker.scriptURL);
         });
         if (!stale.length) return;
         sessionStorage.setItem(marker, '1');
@@ -413,9 +413,15 @@
   // loadAndHook(JSON.stringify(config)) bootstrap — making it readable from
   // inside the proxied page's own runtime, which is what the patched
   // window.open hook (in sj.all.js) checks against for popup blocking.
-  // Keep Scramjet diagnostics enabled by default. This includes rewriter
-  // cache activity and rewritten-page exceptions, which are useful when
-  // diagnosing sites that appear blank or stall during startup.
+  // Scramjet's verbose rewriter diagnostics are opt-in. The parent settings
+  // page stores this preference and also passes it explicitly on fresh loads.
+  var scramjetLogs = false;
+  try {
+    var scramjetLogsParam = new URLSearchParams(location.search).get('scramjetlogs');
+    scramjetLogs = scramjetLogsParam === '1' ||
+      (scramjetLogsParam !== '0' && localStorage.getItem('nexus-scramjet-logs') === '1');
+  } catch (_) {}
+
   var scramjetErrorCapture = true;
   try {
     if (new URLSearchParams(location.search).get('scramjeterrors') === '0' ||
@@ -436,7 +442,7 @@
     // code is reached, so use the compatibility rewrite mode here.
     flags: {
       strictRewrites: false,
-      rewriterLogs: true,
+      rewriterLogs: scramjetLogs,
       captureErrors: scramjetErrorCapture,
       cleanErrors: !scramjetErrorCapture,
       allowInvalidJs: true,
@@ -842,7 +848,7 @@
       // Change this identifier whenever transport code changes. Service
       // workers can otherwise keep an older 1k123.js alive after a Netlify
       // deployment, making the browser appear to ignore the HTTP bridge.
-      var reg = await navigator.serviceWorker.register('/1k123.js?build=math-v5-bodyfix-1', {
+      var reg = await navigator.serviceWorker.register('/1k123.js?build=math-v5-bodyfix-2', {
         updateViaCache: 'none',
         scope: '/',
       });

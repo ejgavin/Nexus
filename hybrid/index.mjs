@@ -50,6 +50,7 @@ function looksLikeTransportFailure(response, method) {
 }
 
 function hybridLog(message, details) {
+  try { if (globalThis.localStorage?.getItem('nexus-scramjet-logs') !== '1') return; } catch (_) { return; }
   console.log('%c[Nexus:hybrid]', 'color:#34d399;font-weight:700', new Date().toISOString(), message, details || '');
 }
 

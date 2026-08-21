@@ -19,7 +19,12 @@
       OPEN: WebSocket.OPEN
     };
   function nexusMuxLog(message, details) {
+    try { if (a?.getItem('nexus-scramjet-logs') !== '1') return; } catch (_) { return; }
     console.log('%c[Nexus:mux]', 'color:#34d399;font-weight:700', message, details || '');
+  }
+  function nexusMuxDebug(...args) {
+    try { if (a?.getItem('nexus-scramjet-logs') !== '1') return; } catch (_) { return; }
+    console.debug(...args);
   }
   async function c() {
     const e = (await self.clients.matchAll({ type: 'window', includeUncontrolled: !0 })).map(async (e) => {
@@ -43,7 +48,7 @@
           console.error('bare-mux: failed to get a bare-mux SharedWorker MessagePort as all clients returned an invalid MessagePort.'),
           new Error('All clients returned an invalid MessagePort.')
         );
-      return (console.warn('bare-mux: failed to get a bare-mux SharedWorker MessagePort within 1s, retrying'), await c());
+      return (nexusMuxDebug('bare-mux: failed to get a bare-mux SharedWorker MessagePort within 1s, retrying'), await c());
     }
   }
   function i(e) {
@@ -71,7 +76,7 @@
             // forever and prevents the SW config acknowledgment from ever
             // arriving.
             if (globalThis.__nexusMuxTransportReady) {
-              console.debug('%c[Nexus:mux]', 'color:#facc15;font-weight:700', 'returning SharedWorker port without waiting for transport setup');
+              nexusMuxDebug('%c[Nexus:mux]', 'color:#facc15;font-weight:700', 'returning SharedWorker port without waiting for transport setup');
             }
             const a = new r(e, 'bare-mux-worker');
             s.call(t.data.port, a.port, [a.port]);
@@ -108,12 +113,12 @@
           }));
       else if (e && SharedWorker) {
         if (!e.startsWith('/') && !e.includes('://')) throw new Error('Invalid URL. Must be absolute or start at the root.');
-        ((this.port = l(e, t)), console.debug('bare-mux: setting localStorage bare-mux-path to', e), (a['bare-mux-path'] = e));
+        ((this.port = l(e, t)), nexusMuxDebug('bare-mux: setting localStorage bare-mux-path to', e), (a['bare-mux-path'] = e));
       } else {
         if (!SharedWorker) throw new Error('Unable to get a channel to the SharedWorker.');
         {
           const e = a['bare-mux-path'];
-          if ((console.debug('bare-mux: got localStorage bare-mux-path:', e), !e))
+          if ((nexusMuxDebug('bare-mux: got localStorage bare-mux-path:', e), !e))
             throw new Error('Unable to get bare-mux workerPath from localStorage.');
           this.port = l(e, t);
         }
@@ -125,7 +130,7 @@
         await i(this.port);
       } catch {
         return (
-          console.warn('bare-mux: Failed to get a ping response from the worker within 1.5s. Assuming port is dead.'),
+          nexusMuxDebug('bare-mux: Failed to get a ping response from the worker within 1.5s. Assuming port is dead.'),
           this.createChannel(),
           await this.sendMessage(e, t)
         );
@@ -278,7 +283,7 @@
       }
     }
   }
-  (console.debug('bare-mux: running v2.1.7 (build c56d286)'),
+  (nexusMuxDebug('bare-mux: running v2.1.7 (build c56d286)'),
     (e.BareClient = m),
     (e.BareMuxConnection = class {
       constructor(e) {

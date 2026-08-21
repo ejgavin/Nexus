@@ -14,12 +14,12 @@
     // landing page. The session marker prevents a reload loop.
     window.__nexusSwMigration = (async function () {
       try {
-        var marker = 'nexus-sw-migration-svg-bodyfix-1';
+        var marker = 'nexus-sw-migration-svg-bodyfix-3';
         if (sessionStorage.getItem(marker) === '1') return;
         var registrations = await navigator.serviceWorker.getRegistrations();
         var stale = registrations.filter(function (registration) {
           var worker = registration.active || registration.waiting || registration.installing;
-          return worker && new URL(worker.scriptURL).pathname === NEXUS_BASE + '1k123.js' && !/build=svg-cdn-bodyfix-1(?:&|$)/.test(worker.scriptURL);
+          return worker && new URL(worker.scriptURL).pathname === NEXUS_BASE + '1k123.js' && !/build=svg-cdn-bodyfix-3(?:&|$)/.test(worker.scriptURL);
         });
         if (!stale.length) return;
         sessionStorage.setItem(marker, '1');
@@ -414,9 +414,15 @@
   // loadAndHook(JSON.stringify(config)) bootstrap — making it readable from
   // inside the proxied page's own runtime, which is what the patched
   // window.open hook (in sj.all.js) checks against for popup blocking.
-  // Keep Scramjet diagnostics enabled by default. This includes rewriter
-  // cache activity and rewritten-page exceptions, which are useful when
-  // diagnosing sites that appear blank or stall during startup.
+  // Scramjet's verbose rewriter diagnostics are opt-in. The parent settings
+  // page stores this preference and also passes it explicitly on fresh loads.
+  var scramjetLogs = false;
+  try {
+    var scramjetLogsParam = new URLSearchParams(location.search).get('scramjetlogs');
+    scramjetLogs = scramjetLogsParam === '1' ||
+      (scramjetLogsParam !== '0' && localStorage.getItem('nexus-scramjet-logs') === '1');
+  } catch (_) {}
+
   var scramjetErrorCapture = true;
   try {
     if (new URLSearchParams(location.search).get('scramjeterrors') === '0' ||
@@ -437,7 +443,7 @@
     // code is reached, so use the compatibility rewrite mode here.
     flags: {
       strictRewrites: false,
-      rewriterLogs: true,
+      rewriterLogs: scramjetLogs,
       captureErrors: scramjetErrorCapture,
       cleanErrors: !scramjetErrorCapture,
       allowInvalidJs: true,
@@ -528,10 +534,10 @@
       location.protocol + '//' + location.host + '/api/ssebridge/',
   };
   if (socksEnabled) store.bareurl += (store.bareurl.indexOf('?') >= 0 ? '&' : '?') + 'socks=1';
-  var bridgeTransportModule = location.origin + NEXUS_BASE + 'httpbridge/index.mjs';
+  var bridgeTransportModule = location.origin + NEXUS_BASE + 'httpbridge/index.mjs?build=svg-cdn-routefix-1';
   // Keep transport fallback fixes from being hidden by a stale browser/CDN
   // module cache after a static deployment.
-  var hybridTransportModule = location.origin + NEXUS_BASE + 'hybrid/index.mjs?build=svg-cdn-v1';
+  var hybridTransportModule = location.origin + NEXUS_BASE + 'hybrid/index.mjs?build=svg-cdn-routefix-2';
   log('transport mode resolved', {
     httpBridge: useHttpBridge,
     httpBridgeWebSocketsOnly: useHttpBridgeWsOnly,
@@ -843,7 +849,7 @@
       // Change this identifier whenever transport code changes. Service
       // workers can otherwise keep an older 1k123.js alive after a Netlify
       // deployment, making the browser appear to ignore the HTTP bridge.
-      var reg = await navigator.serviceWorker.register(NEXUS_BASE + '1k123.js?build=svg-cdn-bodyfix-1', {
+      var reg = await navigator.serviceWorker.register(NEXUS_BASE + '1k123.js?build=svg-cdn-bodyfix-3', {
         updateViaCache: 'none',
         scope: NEXUS_BASE,
       });
