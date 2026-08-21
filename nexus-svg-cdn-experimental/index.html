@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>IXL</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23006fba'/%3E%3Ctext x='32' y='42' text-anchor='middle' font-family='Arial,sans-serif' font-size='28' font-weight='700' fill='white'%3EIXL%3C/text%3E%3C/svg%3E"/>
+  <title>Nexus</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23060c1a'/%3E%3Cpath d='M16 48V16h7l18 21V16h7v32h-7L23 27v21z' fill='%2360a5fa'/%3E%3C/svg%3E"/>
   <script>var NEXUS_BASE = window.__NEXUS_SVG_BASE || new URL('./', location.href).pathname;</script>
   <script src="./config.js"></script>
   <script>
@@ -582,11 +582,11 @@
     });
     if (tab.home || !tab.url) {
       home.classList.remove('gone'); fw.classList.remove('on');
-      urlIn.value = ''; smsg.textContent = 'Ready'; document.title = 'IXL';
+      urlIn.value = ''; smsg.textContent = 'Ready'; document.title = 'Nexus';
     } else {
       home.classList.add('gone'); fw.classList.add('on');
       urlIn.value = tab.url.replace(/^https?:\/\//i, '');
-      smsg.textContent = tab.title || tabLabel(tab); document.title = 'IXL';
+      smsg.textContent = tab.title || tabLabel(tab); document.title = 'Nexus';
     }
     updateBookmarkButton();
   }
@@ -720,7 +720,7 @@
         currentPageTitle = d.title || u.hostname;
         rememberHistory(currentPageUrl, currentPageTitle);
         updateBookmarkButton();
-        document.title = 'IXL';
+        document.title = 'Nexus';
       } catch (e2) { err('failed to handle nexus-nav', e2, d); }
     }
 
@@ -923,7 +923,7 @@
     urlIn.value = '';
     smsg.textContent = 'Ready';
     sdot.classList.remove('spin');
-    document.title = 'IXL';
+    document.title = 'Nexus';
   }
 
   // ── event wiring ───────────────────────────────────────────────────────────

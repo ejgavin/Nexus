@@ -73,6 +73,43 @@ function bridgeWarn(message, details) {
   console.warn('%c[Nexus:httpbridge]', 'color:#f97316;font-weight:700', new Date().toISOString(), message, details || '');
 }
 
+// The bridge normally returns JSON, but an intermediary can occasionally
+// answer with an HTML error page or an empty body (for example during a cold
+// deployment). Calling response.json() directly turns that useful transport
+// failure into the unhelpful "JSON.parse: unexpected character" message.
+// Read the body once, log a bounded preview, and keep the original status in
+// the error that reaches Scramjet.
+async function readJsonResponse(response, label, context) {
+  const contentType = response.headers.get('content-type') || '';
+  const text = await response.text();
+  const normalized = text.replace(/^\uFEFF/, '').trim();
+  if (!normalized) {
+    bridgeWarn(`${label}: empty response`, {
+      ...(context || {}),
+      status: response.status,
+      contentType,
+    });
+    throw new Error(`${label} returned an empty response (HTTP ${response.status})`);
+  }
+  try {
+    return JSON.parse(normalized);
+  } catch (error) {
+    const preview = normalized.slice(0, 240).replace(/[\r\n]+/g, ' ');
+    bridgeWarn(`${label}: non-JSON response`, {
+      ...(context || {}),
+      status: response.status,
+      contentType,
+      preview,
+      parseError: errorDetails(error),
+    });
+    const detail = preview ? `: ${preview}` : '';
+    const wrapped = new Error(`${label} returned non-JSON data (HTTP ${response.status})${detail}`);
+    wrapped.cause = error;
+    wrapped.status = response.status;
+    throw wrapped;
+  }
+}
+
 async function readEvents(response, onEvent, signal, state) {
   if (!response.ok || !response.body) throw new Error(`HTTP event stream failed (${response.status})`);
   bridgeLog('event stream opened', { id: state.id, status: response.status, contentType: response.headers.get('content-type') || '', startedAt: state.startedAt });
@@ -153,10 +190,17 @@ export default class HttpBridgeTransport {
       }),
       signal,
     });
-    const result = await response.json();
+    const result = await readJsonResponse(response, 'HTTP bridge request', {
+      method,
+      url: safeUrl(remote.href),
+    });
     if (!response.ok) {
-      bridgeWarn('HTTP request failed', { method, url: safeUrl(remote.href), status: response.status, error: result.error || '' });
-      throw new Error(result.error || `HTTP bridge request failed (${response.status})`);
+      const message = result && typeof result.error === 'string' ? result.error : `HTTP bridge request failed (${response.status})`;
+      bridgeWarn('HTTP request failed', { method, url: safeUrl(remote.href), status: response.status, error: message });
+      throw new Error(message);
+    }
+    if (!result || typeof result !== 'object') {
+      throw new Error('HTTP bridge request returned an invalid JSON payload');
     }
     const resultBytes = fromBase64(result.body || '');
     // 204/205/304 responses are not allowed to carry a body. Twitch uses
@@ -201,10 +245,17 @@ export default class HttpBridgeTransport {
           signal: state.abort.signal,
         });
         bridgeLog('WebSocket bridge lifecycle: open.response', { id: state.id, status: openResponse.status, ok: openResponse.ok, contentType: openResponse.headers.get('content-type') || '' });
-        const opened = await openResponse.json();
+        const opened = await readJsonResponse(openResponse, 'HTTP bridge WebSocket open', {
+          id: state.id,
+          url: safeUrl(url.href),
+        });
         if (!openResponse.ok) {
-          bridgeWarn('WebSocket bridge lifecycle: open.rejected', { id: state.id, url: safeUrl(url.href), status: openResponse.status, error: opened.error || '' });
-          throw new Error(opened.error || `HTTP bridge open failed (${openResponse.status})`);
+          const message = opened && typeof opened.error === 'string' ? opened.error : `HTTP bridge open failed (${openResponse.status})`;
+          bridgeWarn('WebSocket bridge lifecycle: open.rejected', { id: state.id, url: safeUrl(url.href), status: openResponse.status, error: message });
+          throw new Error(message);
+        }
+        if (!opened || typeof opened !== 'object' || !opened.id || !opened.events) {
+          throw new Error('HTTP bridge WebSocket open returned an invalid JSON payload');
         }
         state.upstreamId = opened.id;
         bridgeLog('WebSocket bridge lifecycle: open.accepted', { id: state.id, upstreamId: state.upstreamId, events: safeUrl(new URL(opened.events, this.base + '/').href), protocol: opened.protocol || '' });

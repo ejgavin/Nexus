@@ -38,7 +38,7 @@ ${l}`}}if((0,n.U5)("rewriterLogs",r.base))for(let e of s.errors)console.error("o
 <html>
 <head>
     <meta charset="utf-8" />
-    <title>Error - PeteZah</title>
+    <title>Error - Nexus</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root {
@@ -294,7 +294,7 @@ ${l}`}}if((0,n.U5)("rewriterLogs",r.base))for(let e of s.errors)console.error("o
     <div id="cover"></div>
     <div id="inner">
         <div class="header">
-            <img src="/storage/images/logo-png-removebg-preview.png" alt="PeteZah Logo" class="logo">
+            <div class="logo" aria-label="Nexus" style="display:grid;place-items:center;border-radius:22px;background:linear-gradient(135deg,#3b7ef6,#22d3ee);color:#fff;font-size:34px;font-weight:800;letter-spacing:-.08em">N</div>
             <h1 id="errorTitle">Connection Error</h1>
             <p class="error-subtitle">We couldn't load <span id="fetchedURL"></span></p>
         </div>
