@@ -1508,6 +1508,47 @@ function wispError(error) {
   return { name: error?.name || 'Error', message: error?.message || String(error) };
 }
 
+function wispHeaderValue(headers, name) {
+  if (!headers) return '';
+  const target = String(name).toLowerCase();
+  try {
+    if (typeof headers.get === 'function') return headers.get(name) || '';
+    if (Array.isArray(headers)) {
+      for (let i = 0; i + 1 < headers.length; i += 2) {
+        if (String(headers[i]).toLowerCase() === target) return String(headers[i + 1] ?? '');
+      }
+      return '';
+    }
+    const key = Object.keys(headers).find((entry) => entry.toLowerCase() === target);
+    return key ? String(headers[key] ?? '') : '';
+  } catch (_) {
+    return '';
+  }
+}
+
+function wispBodyDetails(value, headers) {
+  let type = 'none';
+  if (value != null) {
+    if (value instanceof ArrayBuffer) type = 'ArrayBuffer';
+    else if (ArrayBuffer.isView(value)) type = value.constructor?.name || 'ArrayBufferView';
+    else if (typeof Blob !== 'undefined' && value instanceof Blob) type = 'Blob';
+    else if (typeof ReadableStream !== 'undefined' && value instanceof ReadableStream) type = 'ReadableStream';
+    else type = value.constructor?.name || typeof value;
+  }
+
+  let bytes = null;
+  if (typeof value?.byteLength === 'number') bytes = value.byteLength;
+  else if (typeof value?.size === 'number') bytes = value.size;
+
+  const contentLength = wispHeaderValue(headers, 'content-length');
+  return {
+    type,
+    bytes: Number.isFinite(bytes) ? bytes : null,
+    contentLength: contentLength || null,
+    streamed: type === 'ReadableStream'
+  };
+}
+
 function wispLog(message, details) {
   console.log('%c[Nexus:wisp]', 'color:#60a5fa;font-weight:700', new Date().toISOString(), message, details || '');
 }
@@ -1555,10 +1596,27 @@ var EpoxyTransport = class {
   async request(remote, method, body, headers, signal) {
     if (body instanceof Blob) body = await body.arrayBuffer();
     const requestId = `wisp-http-${++wispRequestSequence}`;
-    wispLog('request.start', { requestId, method, url: wispUrl(remote.href), bodyBytes: body?.byteLength ?? body?.size ?? 0 });
+    wispLog('request.start', {
+      requestId,
+      method,
+      url: wispUrl(remote.href),
+      body: wispBodyDetails(body, headers)
+    });
     try {
       let res = await this.client.fetch(remote.href, { method, body, headers, redirect: 'manual' });
-      wispLog('request.complete', { requestId, status: res.status, url: wispUrl(remote.href), bodyBytes: res.body?.byteLength ?? 0 });
+      wispLog('request.complete', {
+        requestId,
+        status: res.status,
+        statusText: res.statusText,
+        url: wispUrl(remote.href),
+        response: wispBodyDetails(res.body, res.rawHeaders),
+        headers: {
+          contentType: wispHeaderValue(res.rawHeaders, 'content-type') || null,
+          contentLength: wispHeaderValue(res.rawHeaders, 'content-length') || null,
+          location: !!wispHeaderValue(res.rawHeaders, 'location'),
+          setCookie: !!wispHeaderValue(res.rawHeaders, 'set-cookie')
+        }
+      });
       return {
         body: res.body,
         headers: res.rawHeaders,
