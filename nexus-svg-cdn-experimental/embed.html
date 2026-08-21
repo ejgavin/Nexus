@@ -414,15 +414,15 @@
   // loadAndHook(JSON.stringify(config)) bootstrap — making it readable from
   // inside the proxied page's own runtime, which is what the patched
   // window.open hook (in sj.all.js) checks against for popup blocking.
-  // Google and a few other large sites intentionally retry CSS registration
-  // during startup. Scramjet's captureErrors hook turns that site-side
-  // exception into a repeated "CAUGHT ERROR" console warning, even when the
-  // page continues normally. Keep that noisy hook off for normal browsing;
-  // append ?scramjeterrors=1 when debugging a site's rewritten exceptions.
-  var scramjetErrorCapture = false;
+  // Keep Scramjet diagnostics enabled by default. This includes rewriter
+  // cache activity and rewritten-page exceptions, which are useful when
+  // diagnosing sites that appear blank or stall during startup.
+  var scramjetErrorCapture = true;
   try {
-    scramjetErrorCapture = new URLSearchParams(location.search).get('scramjeterrors') === '1' ||
-      localStorage.getItem('nexus-scramjet-errors') === '1';
+    if (new URLSearchParams(location.search).get('scramjeterrors') === '0' ||
+        localStorage.getItem('nexus-scramjet-errors') === '0') {
+      scramjetErrorCapture = false;
+    }
   } catch (_) {}
 
   var SJ_CONFIG = {
@@ -437,6 +437,7 @@
     // code is reached, so use the compatibility rewrite mode here.
     flags: {
       strictRewrites: false,
+      rewriterLogs: true,
       captureErrors: scramjetErrorCapture,
       cleanErrors: !scramjetErrorCapture,
       allowInvalidJs: true,
