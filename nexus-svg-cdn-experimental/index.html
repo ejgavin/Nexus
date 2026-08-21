@@ -897,7 +897,7 @@
       var encodedTarget = 'b64.' + encodeUrlToken(url);
     // jsDelivr serves .html files as text/plain. Use the JavaScript bootstrap
     // in the SVG/CDN build so the iframe receives a real parsed HTML document.
-    var embedEntry = NEXUS_BASE + 'embed.js';
+    var embedEntry = NEXUS_BASE + 'embed.htm';
     var src = embedEntry + '#' + encodedTarget;
       var params = [];
       params.push('clean=' + (cleanEnabled ? '1' : '0'));

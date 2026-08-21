@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Loading Nexus</title>
+  <style>html,body{margin:0;width:100%;height:100%;background:#020810;color:#6a85b0;font:13px system-ui,sans-serif}body{display:grid;place-items:center}</style>
+</head>
+<body>
+  <span>Loading Nexus…</span>
+  <script>
+    (async function () {
+      try {
+        var sourceUrl = new URL('./embed.html', location.href);
+        var response = await fetch(sourceUrl.href, { cache: 'no-store' });
+        if (!response.ok) throw new Error('embed.html returned HTTP ' + response.status);
+        var markup = await response.text();
+        document.open();
+        document.write(markup);
+        document.close();
+      } catch (error) {
+        document.body.textContent = 'Nexus embed bootstrap failed: ' + (error.message || error);
+      }
+    })();
+  </script>
+</body>
+</html>
