@@ -110,6 +110,67 @@ async function readJsonResponse(response, label, context) {
   }
 }
 
+function waitForRetry(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason || new DOMException('The operation was aborted', 'AbortError'));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', cancel);
+      resolve();
+    }, ms);
+    function cancel() {
+      clearTimeout(timer);
+      reject(signal.reason || new DOMException('The operation was aborted', 'AbortError'));
+    }
+    signal?.addEventListener('abort', cancel, { once: true });
+  });
+}
+
+async function fetchBridgeJson(url, options, label, context) {
+  const maxAttempts = 3;
+  const retryable = new Set([502, 503, 504]);
+  let lastError;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    if (options?.signal?.aborted) throw options.signal.reason || new DOMException('The operation was aborted', 'AbortError');
+    let response;
+    try {
+      response = await fetch(url, options);
+      const value = await readJsonResponse(response, label, context);
+      if (retryable.has(response.status) && attempt < maxAttempts) {
+        const delay = 250 * attempt;
+        bridgeWarn(`${label}: retrying transient HTTP status`, {
+          ...(context || {}),
+          attempt,
+          nextAttempt: attempt + 1,
+          status: response.status,
+          delayMs: delay,
+        });
+        await waitForRetry(delay, options?.signal);
+        continue;
+      }
+      return { response, value };
+    } catch (error) {
+      lastError = error;
+      const status = response?.status;
+      if (attempt >= maxAttempts || (status != null && !retryable.has(status))) throw error;
+      const delay = 250 * attempt;
+      bridgeWarn(`${label}: retrying transient bridge failure`, {
+        ...(context || {}),
+        attempt,
+        nextAttempt: attempt + 1,
+        status,
+        delayMs: delay,
+        error: errorDetails(error),
+      });
+      await waitForRetry(delay, options?.signal);
+    }
+  }
+  throw lastError || new Error(`${label} failed`);
+}
+
 async function readEvents(response, onEvent, signal, state) {
   if (!response.ok || !response.body) throw new Error(`HTTP event stream failed (${response.status})`);
   bridgeLog('event stream opened', { id: state.id, status: response.status, contentType: response.headers.get('content-type') || '', startedAt: state.startedAt });
@@ -179,18 +240,18 @@ export default class HttpBridgeTransport {
   async request(remote, method, body, headers, signal) {
     const bytes = await toBytes(body);
     bridgeLog('HTTP request start', { method, url: safeUrl(remote.href), bodyBytes: bytes.length, headerCount: Object.keys(headerObject(headers)).length });
-    const response = await fetch(`${this.base}/request`, {
+    const requestBody = JSON.stringify({
+      url: remote.href,
+      method,
+      headers: headerObject(headers),
+      body: bytes.length ? toBase64(bytes) : '',
+    });
+    const { response, value: result } = await fetchBridgeJson(`${this.base}/request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        url: remote.href,
-        method,
-        headers: headerObject(headers),
-        body: bytes.length ? toBase64(bytes) : '',
-      }),
+      body: requestBody,
       signal,
-    });
-    const result = await readJsonResponse(response, 'HTTP bridge request', {
+    }, 'HTTP bridge request', {
       method,
       url: safeUrl(remote.href),
     });
@@ -238,17 +299,16 @@ export default class HttpBridgeTransport {
     const run = async () => {
       try {
         bridgeLog('WebSocket bridge lifecycle: open.start', { id: state.id, url: safeUrl(url.href), protocols: protocols || [], headerCount: Object.keys(headerObject(requestHeaders)).length });
-        const openResponse = await fetch(`${this.base}/open`, {
+        const { response: openResponse, value: opened } = await fetchBridgeJson(`${this.base}/open`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ url: url.href, protocols }),
           signal: state.abort.signal,
-        });
-        bridgeLog('WebSocket bridge lifecycle: open.response', { id: state.id, status: openResponse.status, ok: openResponse.ok, contentType: openResponse.headers.get('content-type') || '' });
-        const opened = await readJsonResponse(openResponse, 'HTTP bridge WebSocket open', {
+        }, 'HTTP bridge WebSocket open', {
           id: state.id,
           url: safeUrl(url.href),
         });
+        bridgeLog('WebSocket bridge lifecycle: open.response', { id: state.id, status: openResponse.status, ok: openResponse.ok, contentType: openResponse.headers.get('content-type') || '' });
         if (!openResponse.ok) {
           const message = opened && typeof opened.error === 'string' ? opened.error : `HTTP bridge open failed (${openResponse.status})`;
           bridgeWarn('WebSocket bridge lifecycle: open.rejected', { id: state.id, url: safeUrl(url.href), status: openResponse.status, error: message });
