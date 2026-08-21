@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" style="position:fixed;inset:0;background:#020810">
+  <foreignObject x="0" y="0" width="100%" height="100%">
+    <body xmlns="http://www.w3.org/1999/xhtml" style="margin:0;width:100%;height:100%;overflow:hidden;background:#020810">
+      <div id="nexus-embed-loader" style="height:100%;display:grid;place-items:center;color:#6a85b0;font:13px system-ui">Loading Nexus…</div>
+      <script><![CDATA[
+        (() => {
+          const XHTML = 'http://www.w3.org/1999/xhtml';
+          const body = document.querySelector('body');
+          const root = document.getElementById('nexus-embed-loader');
+          if (!body || !root) return;
+
+          const htmlRoot = body.parentElement && body.parentElement.namespaceURI === XHTML ? body.parentElement : body;
+          const head = document.createElementNS(XHTML, 'head');
+          const originalCreateElement = document.createElement.bind(document);
+          body.prepend(head);
+          try { Object.defineProperty(document, 'head', { configurable:true, get() { return head; } }); } catch (_) {}
+          try { Object.defineProperty(document, 'body', { configurable:true, get() { return body; } }); } catch (_) {}
+          try { Object.defineProperty(document, 'documentElement', { configurable:true, get() { return htmlRoot; } }); } catch (_) {}
+          document.createElement = function (tag, options) {
+            return typeof tag === 'string' ? document.createElementNS(XHTML, tag, options) : originalCreateElement(tag, options);
+          };
+
+          const staticEmbed = new URL('./embed.html', location.href);
+          window.__NEXUS_SVG_BASE = new URL('./', staticEmbed.href).pathname;
+          const runScript = (source, sourceBase) => new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            if (source.src) script.src = new URL(source.src, sourceBase).href;
+            if (source.type) script.type = source.type;
+            if (source.src) {
+              script.onload = resolve;
+              script.onerror = () => reject(new Error('SVG Nexus asset failed: ' + script.src));
+            } else {
+              script.textContent = source.textContent || '';
+            }
+            body.appendChild(script);
+            if (!source.src) resolve();
+          });
+
+          fetch(staticEmbed.href, { cache: 'no-store' }).then(response => {
+            if (!response.ok) throw new Error('embed.html returned HTTP ' + response.status);
+            return response.text();
+          }).then(markup => {
+            const source = new DOMParser().parseFromString(markup, 'text/html');
+            if (!source.body) throw new Error('Could not parse the Nexus embed page');
+            document.title = source.title || 'Nexus';
+            Array.from(source.head.children).forEach(node => {
+              if (node.tagName === 'STYLE') head.appendChild(document.importNode(node, true));
+              else if (node.tagName === 'LINK' && /stylesheet/i.test(node.rel || '')) {
+                const link = document.importNode(node, true);
+                link.href = new URL(node.getAttribute('href'), staticEmbed.href).href;
+                head.appendChild(link);
+              }
+            });
+            const headScripts = Array.from(source.head.querySelectorAll('script'));
+            const bodyScripts = Array.from(source.body.querySelectorAll('script'));
+            Array.from(source.body.childNodes).forEach(node => {
+              if (node.nodeType === 1 && node.tagName === 'SCRIPT') return;
+              body.appendChild(document.importNode(node, true));
+            });
+            return headScripts.reduce((promise, script) => promise.then(() => runScript(script, staticEmbed.href)), Promise.resolve())
+              .then(() => bodyScripts.reduce((promise, script) => promise.then(() => runScript(script, staticEmbed.href)), Promise.resolve()))
+              .then(() => root.remove());
+          }).catch(error => {
+            console.error('[Nexus:svg-embed] failed to load embed.html', error);
+            root.textContent = 'Nexus embed failed: ' + (error.message || error);
+          });
+        })();
+      ]]></script>
+    </body>
+  </foreignObject>
+</svg>
