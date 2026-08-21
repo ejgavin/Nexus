@@ -18,6 +18,9 @@
       CONNECTING: WebSocket.CONNECTING,
       OPEN: WebSocket.OPEN
     };
+  function nexusMuxLog(message, details) {
+    console.log('%c[Nexus:mux]', 'color:#34d399;font-weight:700', message, details || '');
+  }
   async function c() {
     const e = (await self.clients.matchAll({ type: 'window', includeUncontrolled: !0 })).map(async (e) => {
         const t = await (function (e) {
@@ -142,22 +145,38 @@
   class u extends EventTarget {
     constructor(e, t = [], r, a) {
       (super(), (this.protocols = t), (this.readyState = n.CONNECTING), (this.url = e.toString()), (this.protocols = t));
+      this._messageCount = 0;
+      nexusMuxLog('websocket request handed to selected transport', {
+        url: this.url,
+        protocols: t,
+        browserWebSocketOpened: false,
+      });
       const o = (e) => {
           ((this.protocols = e), (this.readyState = n.OPEN));
+          nexusMuxLog('websocket transport opened', { url: this.url, protocol: e || '' });
           const t = new Event('open');
           this.dispatchEvent(t);
         },
         s = async (e) => {
+          this._messageCount += 1;
+          nexusMuxLog('websocket transport message', {
+            url: this.url,
+            sequence: this._messageCount,
+            type: e instanceof ArrayBuffer ? 'ArrayBuffer' : typeof e,
+            bytes: typeof e === 'string' ? new TextEncoder().encode(e).byteLength : e?.byteLength ?? e?.size ?? 0,
+          });
           const t = new MessageEvent('message', { data: e });
           this.dispatchEvent(t);
         },
         c = (e, t) => {
           this.readyState = n.CLOSED;
+          nexusMuxLog('websocket transport closed', { url: this.url, code: e, reason: t || '', messages: this._messageCount });
           const r = new CloseEvent('close', { code: e, reason: t });
           this.dispatchEvent(r);
         },
         i = () => {
           this.readyState = n.CLOSED;
+          nexusMuxLog('websocket transport error', { url: this.url });
           const e = new Event('error');
           this.dispatchEvent(e);
         };
@@ -178,10 +197,16 @@
     send(...e) {
       if (this.readyState === n.CONNECTING) throw new DOMException("Failed to execute 'send' on 'WebSocket': Still in CONNECTING state.");
       let t = e[0];
+      nexusMuxLog('websocket send handed to selected transport', {
+        url: this.url,
+        type: typeof t,
+        bytes: typeof t === 'string' ? new TextEncoder().encode(t).byteLength : t?.byteLength ?? t?.size ?? 0,
+      });
       (t.buffer && (t = t.buffer.slice(t.byteOffset, t.byteOffset + t.byteLength)),
         s.call(this.channel.port1, { type: 'data', data: t }, t instanceof ArrayBuffer ? [t] : []));
     }
     close(e, t) {
+      nexusMuxLog('websocket close handed to selected transport', { url: this.url, code: e, reason: t || '' });
       s.call(this.channel.port1, { type: 'close', closeCode: e, closeReason: t });
     }
   }

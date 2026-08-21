@@ -32,7 +32,7 @@
   </script>
   <!-- Keep a root-page bare-mux channel alive. The service worker can ask
        any controlled window for this port before embed.html has loaded. -->
-  <script src="./m4thx/index.js"></script>
+  <script src="./m4thx/index.js?build=sse-diag-v1"></script>
   <script>
     try {
       window.__nexusMuxHandshake = new BareMux.BareMuxConnection(NEXUS_BASE + 'm4thx/worker.js');
