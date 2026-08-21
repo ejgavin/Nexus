@@ -895,7 +895,10 @@
       // Keep the destination out of the visible fragment as a URL-safe
       // base64 token. This is an encoding layer, not encryption.
       var encodedTarget = 'b64.' + encodeUrlToken(url);
-    var src = NEXUS_BASE + 'embed.html#' + encodedTarget;
+    // jsDelivr serves .html files as text/plain. Use the JavaScript bootstrap
+    // in the SVG/CDN build so the iframe receives a real parsed HTML document.
+    var embedEntry = NEXUS_BASE + 'embed.js';
+    var src = embedEntry + '#' + encodedTarget;
       var params = [];
       params.push('clean=' + (cleanEnabled ? '1' : '0'));
       if (restrictParam) params.push('restrict=' + encodeURIComponent(restrictParam));
@@ -904,8 +907,8 @@
       if (useHttpBridge && useHttpBridgeWsOnly) params.push('httpbridgews=1');
       params.push('adblock=' + (adblockEnabled ? '1' : '0'));
       if (socksEnabled) params.push('socks=1');
-      if (params.length) src = NEXUS_BASE + 'embed.html?' + params.join('&') + '#' + encodedTarget;
-      log('nav() setting fr.src (fresh embed.html load)', src);
+      if (params.length) src = embedEntry + '?' + params.join('&') + '#' + encodedTarget;
+      log('nav() setting fr.src (CDN HTML bootstrap load)', src);
       embedReady = false;
       if (activeTab) activeTab.embedReady = false;
       fr.src = src;
