@@ -115,7 +115,7 @@ function isAppShellRequest(request, url) {
   if (path === _nexusBase || path === _nexusBase + 'index.html' || path === _nexusBase + 'index.svg' || path === _nexusBase + 'embed.svg' ||
       path === _nexusBase + 'embed' || path === _nexusBase + 'embed.html' ||
       path === _nexusBase + '1k123.js' || path === _nexusBase + 'config.js' || path === _nexusBase + 'worker.js' ||
-      path === _nexusBase + 'cache-mgr.js') return true;
+      path === _nexusBase + 'cache-mgr.js' || path === _nexusBase + 'favicon.ico') return true;
   if (path.indexOf(_nexusBase + 'assets/') === 0) return true;
   if (path.indexOf(_nexusBase + 'q9vx/') === 0) return true;
   if (path.indexOf(_nexusBase + 'm4thx/') === 0) return true;

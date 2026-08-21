@@ -110,7 +110,7 @@ function isAppShellRequest(request, url) {
   if (path.indexOf(_pref) === 0) return false;
   if (path === '/' || path === '/index.html' || path === '/embed' || path === '/embed.html' ||
       path === '/1k123.js' || path === '/config.js' || path === '/worker.js' ||
-      path === '/cache-mgr.js' || path === '/logo.png') return true;
+      path === '/cache-mgr.js' || path === '/logo.png' || path === '/favicon.ico') return true;
   if (path.indexOf('/assets/') === 0) return true;
   if (path.indexOf('/q9vx/') === 0) return true;
   if (path.indexOf('/m4thx/') === 0) return true;
