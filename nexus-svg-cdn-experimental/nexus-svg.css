@@ -1,0 +1,40 @@
+*{box-sizing:border-box}
+html,body,#nexus-svg-root{width:100%;height:100%;min-height:100%;margin:0}
+body{overflow:hidden;background:#060c1a;color:#c8d8f0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
+.svg-app{height:100%;display:flex;flex-direction:column;background:#060c1a;color:#c8d8f0}
+.svg-top{height:58px;display:flex;align-items:center;gap:12px;padding:0 16px;background:rgba(8,17,35,.96);border-bottom:1px solid rgba(90,150,255,.22);box-shadow:0 5px 22px rgba(0,0,0,.22);z-index:3}
+.svg-brand{display:flex;align-items:center;gap:9px;min-width:112px;color:#eef5ff;font-weight:750;letter-spacing:.04em}
+.svg-mark{width:29px;height:29px;display:grid;place-items:center;border-radius:9px;background:#3b7ef6;color:#fff;font-size:14px;font-weight:800;box-shadow:0 5px 18px rgba(59,126,246,.3)}
+.svg-brand small{display:block;color:#6a85b0;font-size:9px;font-weight:650;letter-spacing:.1em;margin-top:2px}
+.svg-address{display:flex;align-items:center;flex:1;max-width:720px;height:36px;background:#0f1d38;border:1px solid rgba(90,150,255,.27);border-radius:9px;overflow:hidden;transition:border-color .18s,box-shadow .18s}
+.svg-address:focus-within{border-color:rgba(96,165,250,.75);box-shadow:0 0 0 3px rgba(59,126,246,.12)}
+.svg-address span{padding-left:12px;color:#3b7ef6;font:600 12px ui-monospace,SFMono-Regular,Menlo,monospace}
+.svg-address input{min-width:0;flex:1;height:100%;border:0;outline:0;background:transparent;color:#dbe8fb;font:13px inherit;padding:0 8px}
+.svg-address input::placeholder{color:#6a85b0}
+.svg-go,.svg-icon{border:0;color:#a7c5f8;background:transparent;cursor:pointer}
+.svg-go{height:28px;margin-right:4px;padding:0 11px;border-radius:7px;background:#3b7ef6;color:#fff;font-size:11px;font-weight:750}
+.svg-go:hover{background:#4f8cff}
+.svg-actions{display:flex;align-items:center;gap:4px;margin-left:auto}
+.svg-icon{width:32px;height:32px;border-radius:8px;font-size:16px}
+.svg-icon:hover{background:rgba(90,150,255,.14);color:#fff}
+.svg-main{position:relative;display:flex;flex:1;min-height:0}
+.svg-view{width:100%;height:100%;border:0;background:#fff}
+.svg-status{position:absolute;left:14px;bottom:13px;display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid rgba(90,150,255,.22);border-radius:8px;background:rgba(8,17,35,.9);color:#8eabda;font-size:11px;opacity:0;pointer-events:none;transform:translateY(5px);transition:opacity .2s,transform .2s;z-index:2}
+.svg-status.show{opacity:1;transform:translateY(0)}
+.svg-dot{width:7px;height:7px;border-radius:50%;background:#22d3ee;box-shadow:0 0 9px #22d3ee}
+.svg-home{position:absolute;inset:0;display:grid;place-items:center;background:radial-gradient(ellipse 80% 60% at 50% -15%,rgba(30,60,160,.33),transparent 70%),#060c1a;z-index:1}
+.svg-home-card{width:min(560px,calc(100% - 34px));padding:28px;border:1px solid rgba(90,150,255,.2);border-radius:14px;background:rgba(11,20,40,.84);box-shadow:0 24px 70px rgba(0,0,0,.34)}
+.svg-kicker{color:#60a5fa;font-size:10px;font-weight:750;letter-spacing:.13em;text-transform:uppercase}
+.svg-home h1{margin:8px 0 7px;color:#eef5ff;font-size:27px;letter-spacing:-.03em}
+.svg-home p{margin:0 0 19px;color:#7895c4;font-size:13px;line-height:1.55}
+.svg-links{display:flex;flex-wrap:wrap;gap:8px}
+.svg-link{border:1px solid rgba(90,150,255,.23);border-radius:8px;padding:8px 11px;color:#a9c8f7;background:#0d1930;cursor:pointer;font-size:11px}
+.svg-link:hover{border-color:rgba(96,165,250,.65);color:#fff;background:#122448}
+.svg-settings{position:absolute;top:66px;right:14px;width:260px;padding:14px;border:1px solid rgba(90,150,255,.28);border-radius:10px;background:#0b1428;box-shadow:0 18px 42px rgba(0,0,0,.45);z-index:4;display:none}
+.svg-settings.open{display:block}
+.svg-settings h3{margin:0 0 11px;color:#eef5ff;font-size:13px}
+.svg-setting{display:flex;gap:9px;padding:9px 0;border-top:1px solid rgba(90,150,255,.15);font-size:11px;color:#b5caea;line-height:1.35}
+.svg-setting input{accent-color:#3b7ef6;margin-top:1px}
+.svg-note{margin:12px 0 0;color:#6a85b0;font-size:10px;line-height:1.45}
+.svg-loading{height:100%;display:grid;place-items:center;color:#6a85b0;font:13px system-ui,sans-serif}
+@media(max-width:680px){.svg-top{height:auto;min-height:58px;flex-wrap:wrap;padding:10px}.svg-brand{min-width:auto}.svg-address{order:3;flex-basis:100%;max-width:none}.svg-actions{margin-left:auto}.svg-home-card{padding:22px}.svg-home h1{font-size:23px}}

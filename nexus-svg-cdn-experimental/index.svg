@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" style="position:fixed;inset:0;background:#060c1a">
+  <foreignObject x="0" y="0" width="100%" height="100%">
+    <body xmlns="http://www.w3.org/1999/xhtml" style="margin:0;width:100%;height:100%;overflow:hidden;background:#060c1a">
+      <div id="nexus-svg-root"><div class="svg-loading">Loading Nexus…</div></div>
+      <script><![CDATA[
+        (() => {
+          const XHTML = 'http://www.w3.org/1999/xhtml';
+          const body = document.querySelector('body');
+          if (!body) return;
+          const svgRoot = document.documentElement;
+          const htmlRoot = body.parentElement && body.parentElement.namespaceURI === XHTML ? body.parentElement : body;
+          const originalCreateElement = document.createElement.bind(document);
+          try { Object.defineProperty(document, 'head', { configurable:true, get() { return body; } }); } catch (_) {}
+          try { Object.defineProperty(document, 'body', { configurable:true, get() { return body; } }); } catch (_) {}
+          try { Object.defineProperty(document, 'documentElement', { configurable:true, get() { return htmlRoot; } }); } catch (_) {}
+          document.createElement = function (tag, options) {
+            return typeof tag === 'string' ? document.createElementNS(XHTML, tag, options) : originalCreateElement(tag, options);
+          };
+          const params = new URLSearchParams(location.search);
+          const defaultCdn = 'https://cdn.jsdelivr.net/gh/ejgavin/Nexus@main/nexus-svg-cdn-experimental';
+          const cdn = (params.get('cdn') || defaultCdn).replace(/\/+$/, '');
+          const revision = params.get('rev') || 'svg-v1';
+          window.__NEXUS_SVG__ = { cdn, revision };
+          const css = document.createElement('link');
+          css.rel = 'stylesheet';
+          css.href = cdn + '/nexus-svg.css?rev=' + encodeURIComponent(revision);
+          body.prepend(css);
+          const script = document.createElement('script');
+          script.src = cdn + '/nexus-svg-runtime.js?rev=' + encodeURIComponent(revision);
+          script.async = false;
+          body.appendChild(script);
+        })();
+      ]]></script>
+    </body>
+  </foreignObject>
+</svg>
