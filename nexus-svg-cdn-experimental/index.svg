@@ -29,7 +29,7 @@
           // jsDelivr can retain a stale @main copy of index.html even after a
           // purge. Pin the loader's HTML to the verified commit so the SVG
           // entrypoint cannot regress to direct embed.html navigation.
-          const staticIndex = new URL('https://cdn.jsdelivr.net/gh/ejgavin/Nexus@6079042/nexus-svg-cdn-experimental/index.html?svg-entry=1', base);
+          const staticIndex = new URL('https://cdn.jsdelivr.net/gh/ejgavin/Nexus@f8e6b2e/nexus-svg-cdn-experimental/index.html?svg-entry=1', base);
           // SVG foreignObject scripts do not always resolve location.href like
           // a normal HTML document. Pass the actual copied-app folder into the
           // unchanged Nexus landing page before its scripts start.
