@@ -18,10 +18,16 @@
             return typeof tag === 'string' ? document.createElementNS(XHTML, tag, options) : originalCreateElement(tag, options);
           };
           const params = new URLSearchParams(location.search);
-          const defaultCdn = 'https://cdn.jsdelivr.net/gh/ejgavin/Nexus@main/nexus-svg-cdn-experimental';
+          // Prefer same-origin static assets so private GitHub repositories
+          // work through Netlify too. When this SVG itself is served by
+          // jsDelivr, keep the jsDelivr package path as the default instead.
+          const defaultCdn = location.hostname === 'cdn.jsdelivr.net'
+            ? 'https://cdn.jsdelivr.net/gh/ejgavin/Nexus@main/nexus-svg-cdn-experimental'
+            : location.origin + '/nexus-svg-cdn-experimental';
+          const defaultApp = new URL('./', location.href).href.replace(/\/+$/, '');
           const cdn = (params.get('cdn') || defaultCdn).replace(/\/+$/, '');
           const revision = params.get('rev') || 'svg-v1';
-          window.__NEXUS_SVG__ = { cdn, revision };
+          window.__NEXUS_SVG__ = { cdn, revision, defaultApp };
           const css = document.createElement('link');
           css.rel = 'stylesheet';
           css.href = cdn + '/nexus-svg.css?rev=' + encodeURIComponent(revision);

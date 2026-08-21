@@ -1,0 +1,1047 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>IXL</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23006fba'/%3E%3Ctext x='32' y='42' text-anchor='middle' font-family='Arial,sans-serif' font-size='28' font-weight='700' fill='white'%3EIXL%3C/text%3E%3C/svg%3E"/>
+  <script>var NEXUS_BASE = new URL('./', location.href).pathname;</script>
+  <script src="./config.js"></script>
+  <script>
+    // Migrate away from an older root-scoped Nexus worker automatically.
+    // This prevents an old math-v1 worker from continuing to control the
+    // page after a Netlify deployment has published math-v2.
+    window.__nexusSwMigration = (async function () {
+      try {
+        var marker = 'nexus-sw-migration-math-v5-wsdiag';
+        if (sessionStorage.getItem(marker) === '1') return;
+        var registrations = await navigator.serviceWorker.getRegistrations();
+        var stale = registrations.filter(function (registration) {
+          var worker = registration.active || registration.waiting || registration.installing;
+          return worker && /\/1k123\.js(?:\?|$)/.test(worker.scriptURL) && !/build=math-v5-wsdiag(?:&|$)/.test(worker.scriptURL);
+        });
+        if (!stale.length) return;
+        sessionStorage.setItem(marker, '1');
+        await Promise.all(stale.map(function (registration) { return registration.unregister(); }));
+        location.reload();
+        await new Promise(function () {});
+      } catch (error) {
+        console.warn('[Nexus] service-worker migration skipped', error);
+      }
+    })();
+  </script>
+  <!-- Keep a root-page bare-mux channel alive. The service worker can ask
+       any controlled window for this port before embed.html has loaded. -->
+  <script src="./m4thx/index.js"></script>
+  <script>
+    try {
+      window.__nexusMuxHandshake = new BareMux.BareMuxConnection(NEXUS_BASE + 'm4thx/worker.js');
+      var rootQuery = new URLSearchParams(location.search);
+      var rootHttpBridge = rootQuery.get('httpbridge') === '1' || rootQuery.get('httpbridgews') === '1' ||
+        rootQuery.get('transport') === 'httpbridge' || rootQuery.get('transport') === 'hybrid' ||
+        (rootQuery.get('transport') !== 'wisp' && localStorage.getItem('nexus-httpbridge-setting') !== '0');
+      var rootWsOnly = rootHttpBridge && (rootQuery.get('httpbridgews') === '1' ||
+        rootQuery.get('transport') === 'hybrid' ||
+        ((!rootQuery.has('httpbridge') && !rootQuery.has('httpbridgews') && !rootQuery.has('transport')) &&
+          localStorage.getItem('nexus-httpbridge-ws-setting') === '1'));
+      var rootTransport = rootWsOnly ? NEXUS_BASE + 'hybrid/index.mjs' : (rootHttpBridge ? NEXUS_BASE + 'httpbridge/index.mjs' : NEXUS_BASE + 'm4thx/index.mjs');
+      var rootArgs = rootWsOnly ? [_CONFIG.wispurl, _CONFIG.bridgeurl] : (rootHttpBridge ? [_CONFIG.bridgeurl] : [_CONFIG.bareurl]);
+      window.__nexusMuxTransportReady = Promise.resolve(window.__nexusSwMigration).then(function () {
+        return window.__nexusMuxHandshake.setTransport(rootTransport, rootArgs);
+      })
+        .then(function () {
+          console.log('%c[Nexus:parent]', 'color:#3b7ef6;font-weight:700', 'bare-mux responder ready', {
+            transport: rootWsOnly ? 'hybrid' : (rootHttpBridge ? 'http bridge' : 'bare HTTP'),
+            endpoint: _CONFIG.bridgeurl,
+          });
+        })
+        .catch(function (error) {
+          console.error('%c[Nexus:parent]', 'color:#ef4444;font-weight:700', 'failed to configure bare-mux responder', error);
+          throw error;
+        });
+    } catch (error) {
+      console.error('%c[Nexus:parent]', 'color:#ef4444;font-weight:700', 'failed to start bare-mux port responder', error);
+    }
+  </script>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{
+      --bg:#060c1a;--bg1:#0b1428;--bg2:#0f1d38;
+      --b:rgba(56,100,185,.22);--bhi:rgba(90,150,255,.45);
+      --blue:#3b7ef6;--blhi:#60a5fa;--teal:#22d3ee;
+      --tx:#c8d8f0;--txm:#6a85b0;--r:12px;
+      --ease:.2s cubic-bezier(.4,0,.2,1);
+    }
+    html,body{height:100%;background:var(--bg);color:var(--tx);
+      font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;overflow:hidden}
+    .bg{position:fixed;inset:0;pointer-events:none;z-index:0;
+      background:radial-gradient(ellipse 80% 60% at 50% -10%,rgba(30,60,160,.35) 0%,transparent 70%),
+                 radial-gradient(ellipse 50% 50% at 85% 80%,rgba(10,80,180,.18) 0%,transparent 60%),var(--bg)}
+    .bg::before{content:'';position:absolute;inset:0;
+      background-image:radial-gradient(rgba(56,100,185,.18) 1px,transparent 1px);
+      background-size:28px 28px;
+      mask-image:radial-gradient(ellipse 90% 80% at 50% 50%,black 30%,transparent 100%)}
+    #shell{position:relative;z-index:1;display:flex;flex-direction:column;height:100vh}
+
+    /* topbar */
+    #bar{display:flex;align-items:center;gap:12px;padding:0 16px;height:50px;
+      background:rgba(6,12,26,.9);border-bottom:1px solid var(--b);
+      backdrop-filter:blur(12px);flex-shrink:0}
+    .logo{display:flex;align-items:center;gap:8px;cursor:pointer;flex-shrink:0;user-select:none}
+    .logo-txt{font-size:13px;font-weight:700;letter-spacing:.14em;color:var(--blhi);text-transform:uppercase}
+    #addr{flex:1;display:flex;align-items:center;background:var(--bg2);
+      border:1px solid var(--b);border-radius:8px;overflow:hidden;
+      transition:border-color var(--ease),box-shadow var(--ease)}
+    #addr:focus-within{border-color:var(--bhi);box-shadow:0 0 0 3px rgba(59,126,246,.12)}
+    #scheme{padding:0 10px;font-size:12px;color:var(--txm);border-right:1px solid var(--b);
+      height:32px;display:flex;align-items:center;flex-shrink:0;user-select:none}
+    #url{flex:1;height:32px;padding:0 12px;background:transparent;border:none;outline:none;
+      color:var(--tx);font-size:13px;font-family:inherit}
+    #url::placeholder{color:var(--txm)}
+    #go{height:32px;padding:0 14px;background:var(--blue);border:none;
+      border-left:1px solid rgba(59,126,246,.3);color:#fff;font-size:12px;font-weight:700;
+      letter-spacing:.06em;cursor:pointer;transition:background var(--ease);flex-shrink:0}
+    #go:hover{background:var(--blhi)}
+    .btns{display:flex;gap:3px;flex-shrink:0}
+    .btn{width:32px;height:32px;display:flex;align-items:center;justify-content:center;
+      border:none;background:transparent;border-radius:6px;color:var(--txm);cursor:pointer;
+      transition:background var(--ease),color var(--ease)}
+    .btn:hover{background:rgba(59,126,246,.12);color:var(--blhi)}
+    .btn.locked{color:var(--blhi);background:rgba(59,126,246,.14)}
+
+    /* lock/restrict panel */
+    #lock-wrap{position:relative;flex-shrink:0}
+    #lock-panel{position:absolute;top:calc(100% + 8px);right:0;width:280px;
+      background:var(--bg1);border:1px solid var(--b);border-radius:var(--r);
+      box-shadow:0 14px 40px rgba(0,0,0,.5);padding:14px;z-index:20;
+      opacity:0;pointer-events:none;transform:translateY(-6px);
+      transition:opacity var(--ease),transform var(--ease)}
+    #lock-panel.open{opacity:1;pointer-events:all;transform:translateY(0)}
+    #lock-panel h4{font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--tx);margin-bottom:4px}
+    #lock-panel p{font-size:11px;color:var(--txm);line-height:1.5;margin-bottom:10px}
+    #lock-input{width:100%;height:34px;padding:0 10px;background:var(--bg2);
+      border:1px solid var(--b);border-radius:7px;color:var(--tx);font-size:12px;
+      font-family:inherit;outline:none;margin-bottom:8px;transition:border-color var(--ease)}
+    #lock-input:focus{border-color:var(--bhi)}
+    #lock-input::placeholder{color:var(--txm)}
+    #lock-actions{display:flex;gap:6px}
+    #lock-apply{flex:1;height:30px;border:none;border-radius:6px;background:var(--blue);
+      color:#fff;font-size:11.5px;font-weight:700;cursor:pointer;transition:background var(--ease)}
+    #lock-apply:hover{background:var(--blhi)}
+    #lock-clear{height:30px;padding:0 12px;border:1px solid var(--b);border-radius:6px;
+      background:transparent;color:var(--txm);font-size:11.5px;cursor:pointer;
+      transition:border-color var(--ease),color var(--ease)}
+    #lock-clear:hover{border-color:var(--bhi);color:var(--blhi)}
+    #lock-status{margin-top:9px;font-size:10.5px;color:var(--teal);display:none;align-items:center;gap:5px}
+    #lock-status.show{display:flex}
+
+    /* restricted-nav toast (parent-level, mirrors embed.html's own) */
+    #restrict-toast{position:fixed;top:62px;left:50%;transform:translateX(-50%) translateY(-10px);
+      z-index:30;padding:9px 16px;border-radius:10px;background:rgba(11,20,40,.96);
+      border:1px solid rgba(90,150,255,.4);box-shadow:0 8px 28px rgba(0,0,0,.45);
+      color:var(--tx);font-size:12.5px;opacity:0;pointer-events:none;
+      transition:opacity .22s ease,transform .22s ease;max-width:min(90vw,440px);text-align:center}
+    #restrict-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+    #restrict-toast b{color:var(--blhi)}
+
+    /* content */
+    #content{flex:1;position:relative;overflow:hidden}
+
+    /* home */
+    #home{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+      justify-content:center;gap:44px;padding:32px;overflow-y:auto;
+      transition:opacity .25s,transform .25s}
+    #home.gone{opacity:0;pointer-events:none;transform:scale(.98)}
+    .hero{text-align:center;display:flex;flex-direction:column;align-items:center;gap:14px}
+    .badge{display:inline-flex;align-items:center;gap:6px;padding:4px 14px;
+      background:rgba(59,126,246,.1);border:1px solid rgba(59,126,246,.25);
+      border-radius:20px;font-size:11px;font-weight:700;letter-spacing:.1em;
+      text-transform:uppercase;color:var(--blhi)}
+    .dot{width:5px;height:5px;border-radius:50%;background:var(--teal);
+      animation:pulse 2s ease-in-out infinite}
+    @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.75)}}
+    h1{font-size:clamp(34px,5.5vw,62px);font-weight:800;letter-spacing:-.03em;line-height:1.08;
+      background:linear-gradient(135deg,#e2eeff 0%,var(--blhi) 45%,var(--teal) 100%);
+      -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+    .sub{font-size:15px;color:var(--txm);max-width:360px;line-height:1.65}
+    .search{width:100%;max-width:600px;display:flex;flex-direction:column;gap:10px}
+    .row{display:flex;background:var(--bg1);border:1px solid var(--b);border-radius:var(--r);
+      overflow:hidden;transition:border-color var(--ease),box-shadow var(--ease)}
+    .row:focus-within{border-color:var(--bhi);box-shadow:0 0 0 4px rgba(59,126,246,.1),0 8px 28px rgba(0,0,0,.4)}
+    #hinput{flex:1;height:50px;padding:0 20px;background:transparent;border:none;outline:none;
+      color:var(--tx);font-size:15px;font-family:inherit}
+    #hinput::placeholder{color:var(--txm)}
+    #hgo{height:50px;padding:0 22px;
+      background:linear-gradient(135deg,var(--blue) 0%,#2563eb 100%);
+      border:none;border-left:1px solid rgba(59,126,246,.3);color:#fff;
+      font-size:13px;font-weight:700;cursor:pointer;transition:opacity var(--ease);
+      white-space:nowrap;display:flex;align-items:center;gap:7px}
+    #hgo:hover{opacity:.85}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(105px,1fr));gap:8px}
+    .qi{display:flex;flex-direction:column;align-items:center;gap:7px;padding:13px 8px;
+      background:rgba(11,20,40,.7);border:1px solid var(--b);border-radius:var(--r);
+      cursor:pointer;transition:border-color var(--ease),background var(--ease),transform var(--ease);
+      user-select:none}
+    .qi:hover{border-color:var(--bhi);background:var(--bg2);transform:translateY(-2px)}
+    .qi-icon{width:34px;height:34px;border-radius:9px;background:var(--bg2);
+      border:1px solid var(--b);display:flex;align-items:center;justify-content:center;font-size:17px}
+    .qi-lbl{font-size:10.5px;color:var(--txm);font-weight:500;text-align:center}
+    .stats{display:flex;align-items:center;gap:24px}
+    .st{display:flex;flex-direction:column;align-items:center;gap:3px}
+    .stv{font-size:19px;font-weight:800;color:var(--blhi)}
+    .stl{font-size:10px;color:var(--txm);letter-spacing:.06em;text-transform:uppercase}
+    .sep{width:1px;height:28px;background:var(--b)}
+
+    /* browsing frame */
+    #fw{position:absolute;inset:0;display:none}
+    #fw.on{display:block}
+    #fr{width:100%;height:100%;border:none;background:#111}
+
+    /* statusbar */
+    #sb{height:21px;display:flex;align-items:center;padding:0 14px;gap:14px;
+      background:rgba(6,12,26,.92);border-top:1px solid var(--b);flex-shrink:0}
+    .sdot{width:5px;height:5px;border-radius:50%;background:var(--teal);flex-shrink:0}
+    .sdot.spin{background:#f97316;animation:pulse 1s ease-in-out infinite}
+    #smsg{font-size:10px;color:var(--txm);letter-spacing:.03em;
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px}
+    .ssp{flex:1}
+    #ssec{font-size:10px;color:var(--txm);display:flex;align-items:center;gap:4px;flex-shrink:0}
+
+    /* visual system */
+    :root{--bg:#08111f;--bg1:#0d1b2d;--bg2:#12243a;--b:rgba(143,179,219,.16);--bhi:rgba(115,205,192,.55);--blue:#69c6b8;--blhi:#a5f3df;--teal:#f4b860;--tx:#e9f4f1;--txm:#8da6ad;--r:18px}
+    html,body{background:#08111f;color:var(--tx)}
+    .bg{background:radial-gradient(ellipse 70% 55% at 30% -10%,rgba(55,118,146,.38),transparent 70%),radial-gradient(ellipse 45% 50% at 100% 90%,rgba(191,122,50,.14),transparent 65%),#08111f}
+    .bg::before{background-image:linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);background-size:36px 36px;mask-image:linear-gradient(to bottom,black,transparent 82%)}
+    .rail{position:fixed;inset:0 auto 0 0;width:76px;z-index:10;display:flex;flex-direction:column;align-items:center;padding:18px 0;background:rgba(5,14,25,.84);border-right:1px solid var(--b);backdrop-filter:blur(18px)}
+    .rail-mark{width:38px;height:38px;display:grid;place-items:center;border-radius:14px;background:linear-gradient(145deg,#194153,#0c2936);border:1px solid rgba(165,243,223,.26);color:var(--blhi);font-size:18px;font-weight:800;box-shadow:0 10px 24px rgba(0,0,0,.24)}
+    .rail-line{width:24px;height:1px;background:var(--b);margin:20px 0}
+    .rail-nav{display:flex;flex-direction:column;gap:10px}.rail-nav button{width:40px;height:40px;border:0;border-radius:13px;background:transparent;color:var(--txm);cursor:pointer;display:grid;place-items:center;font-size:16px;transition:.2s}.rail-nav button:hover,.rail-nav button.active{background:rgba(105,198,184,.12);color:var(--blhi)}
+    .rail-foot{margin-top:auto;color:var(--txm);font-size:10px;letter-spacing:.12em;writing-mode:vertical-rl;text-transform:uppercase}
+    #bar,#content,#sb{margin-left:76px}
+    #bar{height:68px;padding:0 28px;gap:18px;background:rgba(8,17,31,.72);border-bottom:1px solid var(--b)}
+    .logo{gap:10px}.logo svg{display:none}.logo-txt{font-size:12px;letter-spacing:.16em;color:var(--blhi)}
+    .logo-txt::before{content:'N';display:inline-grid;place-items:center;width:25px;height:25px;margin-right:8px;border-radius:9px;background:#173c4b;color:#a5f3df;font-size:14px;letter-spacing:0;vertical-align:middle}
+    #addr{height:42px;background:rgba(18,36,58,.74);border-radius:12px}#scheme{height:32px;color:#6ea99f}#url{height:40px;font-size:13px}#go{height:32px;margin-right:5px;border-radius:8px;background:#69c6b8;color:#07201e}#go:hover{background:#a5f3df}
+    .btn{width:36px;height:36px;border-radius:10px;color:#8da6ad}.btn:hover{background:rgba(105,198,184,.1);color:var(--blhi)}.btn.locked{background:rgba(105,198,184,.14);color:var(--blhi)}
+    #content{overflow:auto}#home{justify-content:flex-start;align-items:stretch;gap:28px;padding:clamp(30px,6vw,82px) clamp(24px,8vw,120px);max-width:1260px;margin:0 auto}
+    .hero{text-align:left;align-items:flex-start;gap:16px;max-width:760px}.badge{padding:7px 12px;border-radius:10px;background:rgba(105,198,184,.1);border-color:rgba(105,198,184,.22);color:var(--blhi)}h1{font-size:clamp(42px,6.5vw,84px);letter-spacing:-.06em;line-height:.98;background:linear-gradient(120deg,#f0fbf7 10%,#a5f3df 55%,#f4b860 100%);-webkit-background-clip:text;background-clip:text}.sub{max-width:520px;font-size:16px;line-height:1.7;color:#9fb5b8}
+    .search{max-width:780px;gap:14px}.row{background:rgba(13,27,45,.82);border-color:rgba(165,243,223,.16);border-radius:16px;box-shadow:0 18px 40px rgba(0,0,0,.16)}#hinput{height:62px;padding-left:22px;font-size:15px}#hgo{height:62px;padding:0 25px;border-radius:0;background:linear-gradient(135deg,#69c6b8,#9cead6);color:#08201e}
+    .grid{grid-template-columns:repeat(4,1fr);gap:10px}.qi{min-height:90px;align-items:flex-start;text-align:left;padding:14px;border-radius:14px;background:rgba(13,27,45,.58);border-color:var(--b)}.qi:hover{transform:translateY(-3px);background:#132b41}.qi-icon{width:30px;height:30px;border-radius:9px;background:#173345;border-color:rgba(165,243,223,.16)}.qi-lbl{font-size:11px;color:#b2c5c5}
+    .stats{justify-content:flex-start;gap:18px;margin-top:6px}.st{align-items:flex-start}.stv{font-size:17px;color:var(--blhi)}.stl{color:#738c94}.sep{background:var(--b)}
+    #fw{inset:16px 22px 16px 22px;border:1px solid var(--b);border-radius:16px;overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.28)}#fr{background:#fff}
+    #sb{height:28px;padding:0 22px;background:rgba(5,14,25,.88);border-top-color:var(--b)}#smsg,#ssec{font-size:10px}.sdot{background:var(--blhi)}
+    #lock-panel,#settings-panel{background:#102238;border-color:rgba(165,243,223,.18);border-radius:16px;box-shadow:0 18px 50px rgba(0,0,0,.42)}#lock-panel{width:310px}#lock-panel h4,#settings-panel h4{font-size:13px}#lock-panel p,#settings-panel p{color:#91a9ae;line-height:1.6}
+    #settings-wrap{position:relative;flex-shrink:0}#settings-panel{position:absolute;top:calc(100% + 8px);right:0;width:330px;padding:16px;z-index:20;opacity:0;pointer-events:none;transform:translateY(-6px);transition:opacity .2s,transform .2s}#settings-panel.open{opacity:1;pointer-events:all;transform:translateY(0)}#settings-panel h4{margin-bottom:5px;color:#e9f4f1}#settings-panel p{font-size:11px;margin-bottom:12px}.setting-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--b);font-size:12px}.setting-row input[type=checkbox]{accent-color:#69c6b8;width:16px;height:16px}.setting-row label{cursor:pointer}.setting-label{display:flex;flex-direction:column;gap:2px}.setting-label small{font-size:10px;color:#78929a}.settings-input{width:100%;height:34px;padding:0 10px;background:#0c1a2c;border:1px solid var(--b);border-radius:8px;color:var(--tx);font:12px inherit;outline:none}.settings-input:focus{border-color:var(--bhi)}#settings-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:13px}.settings-action{height:30px;padding:0 12px;border-radius:8px;border:1px solid var(--b);background:transparent;color:var(--txm);cursor:pointer}.settings-action.primary{border-color:transparent;background:#69c6b8;color:#08201e;font-weight:700}
+    @media (max-width:760px){#bar,#tabs,#content,#sb{margin-left:0}.rail{display:none}#bar{padding:0 12px;gap:8px}.logo-txt{display:none}.btns{gap:0}.grid{grid-template-columns:repeat(2,1fr)}#home{padding:40px 20px}.hero{max-width:none}#fw{inset:8px}.ssp,#ssec{display:none}}
+
+    /* restrained utility skin: flat surfaces, compact type, no promotional glow */
+    :root{--bg:#17191c;--bg1:#202327;--bg2:#292d32;--b:rgba(255,255,255,.11);--bhi:rgba(255,255,255,.28);--blue:#6e9fc7;--blhi:#a9c8df;--teal:#8fb59b;--tx:#e3e6e8;--txm:#9aa1a7;--r:6px}
+    html,body{background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}
+    .bg{background:#17191c}.bg::before{display:none}
+    .rail{width:62px;padding:14px 0;background:#1d2023;border-right-color:var(--b);backdrop-filter:none}
+    .rail-mark{width:32px;height:32px;border-radius:5px;background:#30353a;border:1px solid rgba(255,255,255,.18);box-shadow:none;color:#dfe4e8;font-size:15px}
+    .rail-line{width:30px;margin:15px 0}.rail-nav{gap:4px}.rail-nav button{width:34px;height:34px;border-radius:5px;font-size:15px}.rail-nav button:hover,.rail-nav button.active{background:#30353a;color:#e3e6e8}.rail-foot{font-size:9px;color:#727a81;letter-spacing:.08em}
+    #bar,#content,#sb{margin-left:62px}
+    #bar{height:56px;padding:0 14px;gap:12px;background:#1d2023;border-bottom-color:var(--b);backdrop-filter:none}
+    .logo{gap:7px}.logo-txt{font-size:12px;letter-spacing:.08em;color:#d9dee1}.logo-txt::before{width:22px;height:22px;margin-right:6px;border-radius:4px;background:#30353a;color:#d9dee1;font-size:12px}
+    #addr{height:34px;background:#292d32;border-radius:5px;box-shadow:none}#scheme{height:26px;padding:0 8px;font-size:11px}#url{height:32px;font-size:12px}#go{height:26px;margin-right:4px;border-radius:4px;background:#6e9fc7;color:#101820;font-size:11px;letter-spacing:0}#go:hover{background:#a9c8df}
+    .btn{width:30px;height:30px;border-radius:5px}.btn:hover{background:#30353a;color:#e3e6e8}.btn.locked{background:#303b43;color:#a9c8df}
+    #content{overflow:auto}#home{justify-content:flex-start;align-items:stretch;gap:26px;padding:54px clamp(22px,7vw,88px);max-width:1060px;margin:0 auto}
+    .hero{gap:10px;max-width:640px}.badge{display:none}h1{font-size:32px;font-weight:600;letter-spacing:-.02em;line-height:1.15;background:none;-webkit-text-fill-color:initial;color:#f0f2f3}.sub{max-width:500px;font-size:13px;line-height:1.55;color:#a4abb0}
+    .search{max-width:680px;gap:12px}.row{background:#202327;border-color:var(--b);border-radius:6px;box-shadow:none}.row:focus-within{border-color:var(--bhi);box-shadow:0 0 0 2px rgba(169,200,223,.08)}#hinput{height:46px;padding:0 14px;font-size:13px}#hgo{height:46px;padding:0 17px;border-left:1px solid var(--b);border-radius:0;background:#6e9fc7;color:#101820;font-size:12px;box-shadow:none}#hgo:hover{background:#a9c8df}
+    .grid{grid-template-columns:repeat(4,1fr);gap:6px}.qi{min-height:66px;gap:7px;padding:10px;border-radius:5px;background:#202327;border-color:var(--b);box-shadow:none}.qi:hover{transform:none;background:#292d32;border-color:var(--bhi)}.qi-icon{width:24px;height:24px;border-radius:4px;background:#30353a;border-color:var(--b);font-size:10px;font-weight:700;color:#dce2e5}.qi-lbl{font-size:11px;color:#c3c9cd}
+    .stats{gap:14px;margin-top:0}.stv{font-size:12px;font-weight:600;color:#bac7cf}.stl{font-size:9px;color:#7f898f}.sep{height:22px;background:var(--b)}
+    #fw{inset:10px 14px;border-color:var(--b);border-radius:5px;box-shadow:none}
+    #sb{height:24px;padding:0 14px;background:#1d2023;border-top-color:var(--b)}#smsg,#ssec{font-size:10px}.sdot{background:var(--teal)}
+    #lock-panel,#settings-panel{background:#25292d;border-color:var(--b);border-radius:6px;box-shadow:0 10px 24px rgba(0,0,0,.35)}#lock-panel{width:300px}#lock-panel h4,#settings-panel h4{font-size:12px}#lock-panel p,#settings-panel p{color:#a4abb0;line-height:1.5}
+    #settings-panel{width:320px}.settings-input,#lock-input{background:#1d2023;border-color:var(--b);border-radius:4px}.settings-action{border-radius:4px}.settings-action.primary,#lock-apply{background:#6e9fc7;color:#101820}.settings-action.primary:hover,#lock-apply:hover{background:#a9c8df}
+
+    /* browser-style tabs */
+    #tabs{height:34px;margin-left:62px;display:flex;align-items:flex-end;gap:4px;padding:0 10px;background:#181b1e;border-bottom:1px solid var(--b);overflow:hidden;flex-shrink:0}
+    #tab-list{display:flex;align-items:flex-end;gap:3px;min-width:0;height:100%;overflow:hidden}
+    .tab{height:29px;min-width:130px;max-width:220px;display:flex;align-items:center;gap:7px;padding:0 7px 0 10px;border:1px solid transparent;border-bottom:0;border-radius:6px 6px 0 0;background:#202327;color:var(--txm);font-size:11px;cursor:pointer;user-select:none}
+    .tab:hover{background:#292d32;color:var(--tx)}.tab.active{background:#292d32;border-color:var(--b);color:var(--tx)}
+    .tab-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}.tab-audio{display:none;width:19px;height:19px;align-items:center;justify-content:center;border:0;border-radius:4px;background:transparent;color:var(--txm);font-size:12px;line-height:1;cursor:pointer;flex-shrink:0}.tab.has-audio .tab-audio{display:flex}.tab-audio:hover{background:#454b50;color:var(--tx)}
+    .tab-close{width:19px;height:19px;display:flex;align-items:center;justify-content:center;border:0;border-radius:4px;background:transparent;color:var(--txm);font-size:15px;line-height:1;cursor:pointer}.tab-close:hover{background:#454b50;color:var(--tx)}
+    #new-tab{width:27px;height:27px;margin-bottom:1px;border:0;border-radius:5px;background:transparent;color:var(--txm);font-size:20px;line-height:1;cursor:pointer;flex-shrink:0}#new-tab:hover{background:#30353a;color:var(--tx)}
+    #fw iframe{display:none}#fw iframe.active{display:block}
+
+    /* history and bookmarks */
+    #library-overlay{position:fixed;inset:0;z-index:40;display:none;align-items:flex-start;justify-content:flex-end;padding:68px 18px 18px;background:rgba(0,0,0,.28)}
+    #library-overlay.open{display:flex}
+    #library-panel{width:min(390px,calc(100vw - 28px));max-height:calc(100vh - 86px);display:flex;flex-direction:column;background:#25292d;border:1px solid var(--b);border-radius:6px;box-shadow:0 16px 40px rgba(0,0,0,.5);overflow:hidden}
+    #library-head{display:flex;align-items:center;justify-content:space-between;padding:13px 14px;border-bottom:1px solid var(--b)}#library-head h3{font-size:13px;font-weight:600;color:#eef1f2}#library-close{width:26px;height:26px;border:0;border-radius:4px;background:transparent;color:var(--txm);font-size:20px;line-height:1;cursor:pointer}#library-close:hover{background:#30353a;color:var(--tx)}
+    #library-tabs{display:flex;gap:4px;padding:8px 10px;border-bottom:1px solid var(--b)}.library-tab{flex:1;height:28px;border:1px solid transparent;border-radius:4px;background:transparent;color:var(--txm);font-size:11px;cursor:pointer}.library-tab.active{background:#30353a;border-color:var(--bhi);color:var(--tx)}
+    #library-list{min-height:80px;overflow:auto;padding:6px}.library-empty{padding:24px 14px;text-align:center;color:var(--txm);font-size:12px}.library-item{display:flex;align-items:center;gap:8px;padding:9px 8px;border-radius:4px}.library-item:hover{background:#30353a}.library-open{min-width:0;flex:1;border:0;background:transparent;color:var(--tx);text-align:left;cursor:pointer}.library-title{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.library-url{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:3px;color:var(--txm);font-size:10px}.library-remove{width:24px;height:24px;border:0;border-radius:4px;background:transparent;color:var(--txm);cursor:pointer}.library-remove:hover{background:#454b50;color:#f0b1a8}
+    #library-search{box-sizing:border-box;margin:9px 10px 3px;width:calc(100% - 20px);height:31px}
+    #library-foot{display:flex;justify-content:flex-end;padding:8px 10px;border-top:1px solid var(--b)}#library-clear{height:27px;padding:0 10px;border:1px solid var(--b);border-radius:4px;background:transparent;color:var(--txm);font-size:10px;cursor:pointer}#library-clear:hover{border-color:var(--bhi);color:var(--tx)}
+  </style>
+</head>
+<body>
+<div class="bg"></div>
+<div id="shell">
+
+  <aside class="rail" aria-label="Nexus navigation">
+    <div class="rail-mark">N</div>
+    <div class="rail-line"></div>
+    <div class="rail-nav">
+      <button class="active" id="nav-home" title="Home" aria-label="Home">⌂</button>
+      <button id="nav-bookmarks" title="Bookmarks" aria-label="Bookmarks">☆</button>
+      <button id="nav-history" title="History" aria-label="History">◷</button>
+    </div>
+    <div class="rail-foot">NEXUS</div>
+  </aside>
+
+  <div id="bar">
+    <div class="logo" id="logo">
+      <svg width="24" height="24" viewBox="0 0 26 26" fill="none">
+        <circle cx="13" cy="13" r="11" stroke="#3b7ef6" stroke-width="1.5"/>
+        <circle cx="13" cy="13" r="6"  stroke="#60a5fa" stroke-width="1.2"/>
+        <path d="M13 2C8 6 8 20 13 24C18 20 18 6 13 2Z" stroke="#22d3ee" stroke-width="1.1" fill="none"/>
+        <line x1="2" y1="13" x2="24" y2="13" stroke="#3b7ef6" stroke-width="1" opacity=".6"/>
+        <circle cx="13" cy="13" r="2" fill="#60a5fa"/>
+      </svg>
+      <span class="logo-txt">Nexus</span>
+    </div>
+
+    <div id="addr">
+      <div id="scheme">https://</div>
+      <input id="url" type="text" placeholder="Enter a URL…" spellcheck="false" autocomplete="off"/>
+      <button id="go">GO</button>
+    </div>
+
+    <div class="btns">
+      <button class="btn" id="bback" title="Back">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <button class="btn" id="bforward" title="Forward">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+      <button class="btn" id="breload" title="Reload">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+      </button>
+      <button class="btn" id="bhome" title="Home">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      </button>
+      <button class="btn" id="bfs" title="Fullscreen">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+      </button>
+      <button class="btn" id="bmark" title="Bookmark this page" aria-label="Bookmark this page">☆</button>
+      <div id="settings-wrap">
+        <button class="btn" id="bsettings" title="Page settings" aria-label="Page settings">⚙</button>
+        <div id="settings-panel" role="dialog" aria-label="Page settings">
+          <h4>Page settings</h4>
+          <div class="setting-row">
+            <input id="use-httpbridge" type="checkbox"/>
+            <div class="setting-label"><label for="use-httpbridge">Use HTTP bridge</label><small>Use the HTTP-stream transport for new pages.</small></div>
+          </div>
+          <div class="setting-row setting-subrow">
+            <input id="use-httpbridge-ws-only" type="checkbox"/>
+            <div class="setting-label"><label for="use-httpbridge-ws-only">HTTP bridge for WebSockets only</label><small>Keep normal page requests on Wisp/bare and use the bridge for WebSocket traffic.</small></div>
+          </div>
+          <div class="setting-row">
+            <input id="use-adblock" type="checkbox"/>
+            <div class="setting-label"><label for="use-adblock">Built-in ad blocker</label><small>Block common ad, tracker, popup, and ad-container requests.</small></div>
+          </div>
+          <div class="setting-row">
+            <input id="use-socks" type="checkbox"/>
+            <div class="setting-label"><label for="use-socks">Use SOCKS routing</label><small>Ask the backend to route Wisp/Bare traffic through its configured SOCKS route.</small></div>
+          </div>
+          <div id="settings-actions"><button class="settings-action" id="settings-reset">Reset</button><button class="settings-action primary" id="settings-apply">Apply</button></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div id="library-overlay" aria-hidden="true">
+    <section id="library-panel" role="dialog" aria-label="History and bookmarks">
+      <div id="library-head"><h3 id="library-title">History</h3><button id="library-close" aria-label="Close">×</button></div>
+      <div id="library-tabs"><button class="library-tab active" data-library-mode="history">History</button><button class="library-tab" data-library-mode="bookmarks">Bookmarks</button></div>
+      <input id="library-search" class="settings-input" placeholder="Search history and bookmarks" spellcheck="false"/>
+      <div id="library-list"></div>
+      <div id="library-foot"><button id="library-clear">Clear history</button></div>
+    </section>
+  </div>
+
+  <div id="tabs" aria-label="Browser tabs">
+    <div id="tab-list"></div>
+    <button id="new-tab" title="New tab" aria-label="New tab">+</button>
+  </div>
+
+  <div id="content">
+    <div id="home">
+      <div class="hero">
+        <div class="badge"><div class="dot"></div>Session Active</div>
+        <h1>Open a site</h1>
+        <p class="sub">Enter a web address to open it.</p>
+      </div>
+      <div class="search">
+        <div class="row">
+          <input id="hinput" type="text" placeholder="Enter any url"
+            spellcheck="false" autocomplete="off"/>
+          <button id="hgo">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
+            </svg>
+            Open
+          </button>
+        </div>
+        <div class="grid">
+          <div class="qi" data-url="https://www.youtube.com"><div class="qi-icon">YT</div><span class="qi-lbl">YouTube</span></div>
+          <div class="qi" data-url="https://www.google.com"><div class="qi-icon">G</div><span class="qi-lbl">Google</span></div>
+          <div class="qi" data-url="https://discord.com/app"><div class="qi-icon">DC</div><span class="qi-lbl">Discord</span></div>
+          <div class="qi" data-url="https://www.reddit.com"><div class="qi-icon">RD</div><span class="qi-lbl">Reddit</span></div>
+          <div class="qi" data-url="https://x.com"><div class="qi-icon">X</div><span class="qi-lbl">Twitter</span></div>
+          <div class="qi" data-url="https://www.twitch.tv"><div class="qi-icon">TW</div><span class="qi-lbl">Twitch</span></div>
+          <div class="qi" data-url="https://open.spotify.com"><div class="qi-icon">SP</div><span class="qi-lbl">Spotify</span></div>
+          <div class="qi" data-url="https://github.com"><div class="qi-icon">GH</div><span class="qi-lbl">GitHub</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="fw">
+      <iframe id="fr" allow="fullscreen *"></iframe>
+    </div>
+  </div>
+
+  <div id="sb">
+    <div class="sdot" id="sdot"></div>
+    <span id="smsg">Ready</span>
+    <div class="ssp"></div>
+    <div id="ssec">
+      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="11" width="18" height="11" rx="2"/>
+        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+      </svg>
+      Ready
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  // ── debug logger ─────────────────────────────────────────────────────────
+  // Toggle with: localStorage.setItem('nexus-debug','0') to quiet it down,
+  // or localStorage.removeItem('nexus-debug') / '1' to re-enable (on by
+  // default). All logs are tagged [Nexus:parent] so you can filter the
+  // console by that string and immediately tell parent-frame logs apart
+  // from embed.html's [Nexus:embed] and the SW's [Nexus:sw] logs.
+  // Diagnostics are deliberately on in this build. Filter by [Nexus:parent]
+  // when inspecting a page with a noisy third-party console.
+  var DEBUG = true;
+  function log(msg)  { if (DEBUG) console.log('%c[Nexus:parent]', 'color:#3b7ef6;font-weight:700', msg, arguments.length > 1 ? Array.prototype.slice.call(arguments, 1) : ''); }
+  function warn(msg) { console.warn('%c[Nexus:parent]', 'color:#f97316;font-weight:700', msg, arguments.length > 1 ? Array.prototype.slice.call(arguments, 1) : ''); }
+  function err(msg)  { console.error('%c[Nexus:parent]', 'color:#ef4444;font-weight:700', msg, arguments.length > 1 ? Array.prototype.slice.call(arguments, 1) : ''); }
+
+  function encodeUrlToken(value) {
+    var bytes = new TextEncoder().encode(String(value));
+    var binary = '';
+    for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  function decodeUrlToken(value) {
+    if (value.indexOf('b64.') !== 0) return value;
+    try {
+      var encoded = value.slice(4).replace(/-/g, '+').replace(/_/g, '/');
+      while (encoded.length % 4) encoded += '=';
+      var binary = atob(encoded), bytes = new Uint8Array(binary.length);
+      for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return new TextDecoder().decode(bytes);
+    } catch (_) { return ''; }
+  }
+
+  log('parent page script starting', location.href);
+
+  var home  = document.getElementById('home');
+  var fw    = document.getElementById('fw');
+  var fr    = document.getElementById('fr');
+  var urlIn = document.getElementById('url');
+  var hIn   = document.getElementById('hinput');
+  var smsg  = document.getElementById('smsg');
+  var sdot  = document.getElementById('sdot');
+  var settingsWrap = document.getElementById('settings-wrap');
+  var settingsPanel = document.getElementById('settings-panel');
+  var useHttpBridgeInput = document.getElementById('use-httpbridge');
+  var useHttpBridgeWsOnlyInput = document.getElementById('use-httpbridge-ws-only');
+  var useAdblockInput = document.getElementById('use-adblock');
+  var useSocksInput = document.getElementById('use-socks');
+  var tabList = document.getElementById('tab-list');
+  var tabs = [];
+  var activeTab = null;
+  var nextTabId = 1;
+
+  var query = new URLSearchParams(location.search);
+  var restrictParam = query.get('restrict') || query.get('domain_restrict') || '';
+  // Preserve transport flags when the parent creates a fresh embed frame.
+  var useHttpBridge = query.get('httpbridge') === '1' ||
+    query.get('httpbridgews') === '1' ||
+    query.get('transport') === 'httpbridge' ||
+    query.get('transport') === 'hybrid' ||
+    (query.get('transport') !== 'wisp' && localStorage.getItem('nexus-httpbridge-setting') !== '0');
+  var useHttpBridgeWsOnly = useHttpBridge && (
+    query.get('httpbridgews') === '1' ||
+    query.get('transport') === 'hybrid' ||
+    localStorage.getItem('nexus-httpbridge-ws-setting') === '1');
+  var adblockEnabled = query.get('adblock') !== '0' && localStorage.getItem('nexus-adblock-setting') !== '0';
+  var socksEnabled = query.get('socks') === '1' || localStorage.getItem('nexus-socks-setting') === '1';
+  var cleanParam = query.get('clean') || query.get('remove') || query.get('remove_element');
+  var cleanEnabled = true;
+  var cleanSelector = query.get('remove_selector') || query.get('selector') || '';
+  useHttpBridgeInput.checked = useHttpBridge;
+  useHttpBridgeWsOnlyInput.checked = useHttpBridgeWsOnly;
+  useHttpBridgeWsOnlyInput.disabled = !useHttpBridge;
+  useAdblockInput.checked = adblockEnabled;
+  useSocksInput.checked = socksEnabled;
+
+  // Whether the CURRENT fr.src instance is a live, message-capable
+  // embed.html we can send 'go' commands to, rather than re-deriving this
+  // from fr.contentWindow.location.pathname === '/embed.html' every time.
+  // That pathname check is unreliable: some dev/hosting setups 301-redirect
+  // /embed.html -> /embed (stripping the extension for "clean URLs"), so
+  // the real pathname never matches '/embed.html' again after the very
+  // first load — every subsequent nav() call would wrongly conclude the
+  // frame isn't ready and do a full destructive reload (fr.src = ...)
+  // instead of a lightweight cmd('go', ...), tearing down an already-live
+  // page, SW connection, and transport on every single navigation.
+  var embedReady = false;
+
+  function tabForSource(source) {
+    for (var i = 0; i < tabs.length; i++) {
+      if (tabs[i].frame.contentWindow === source) return tabs[i];
+    }
+    return null;
+  }
+
+  function tabLabel(tab) {
+    if (!tab.url) return 'New tab';
+    try { return new URL(tab.url).hostname.replace(/^www\./, '') || 'New tab'; }
+    catch (_) { return 'New tab'; }
+  }
+
+  function updateTabLabel(tab) {
+    if (!tab || !tab.titleEl) return;
+    tab.titleEl.textContent = tab.title || tabLabel(tab);
+    tab.titleEl.title = tab.title || tabLabel(tab);
+  }
+
+  function registerTab(frame) {
+    var tab = { id: nextTabId++, frame: frame, button: null, titleEl: null, url: '', title: '', home: true, embedReady: false };
+    var button = document.createElement('div');
+    button.className = 'tab';
+    button.setAttribute('role', 'tab');
+    button.setAttribute('aria-label', 'New tab');
+    var titleEl = document.createElement('span');
+    titleEl.className = 'tab-title';
+    titleEl.textContent = 'New tab';
+    var audio = document.createElement('button');
+    audio.className = 'tab-audio';
+    audio.type = 'button';
+    audio.setAttribute('aria-label', 'Mute tab');
+    audio.textContent = '🔊';
+    var close = document.createElement('button');
+    close.className = 'tab-close';
+    close.type = 'button';
+    close.title = 'Close tab';
+    close.setAttribute('aria-label', 'Close tab');
+    close.textContent = '×';
+    button.appendChild(audio); button.appendChild(titleEl); button.appendChild(close);
+    tab.button = button; tab.titleEl = titleEl; tab.audioEl = audio; tab.audioPlaying = false; tab.audioMuted = false;
+    button.addEventListener('click', function () { setActiveTab(tab); });
+    close.addEventListener('click', function (e) { e.stopPropagation(); closeTab(tab); });
+    audio.addEventListener('click', function (e) {
+      e.stopPropagation();
+      tab.frame.contentWindow.postMessage({ type: 'nexus-cmd', cmd: 'audioToggle' }, '*');
+    });
+    tabList.appendChild(button);
+    tabs.push(tab);
+    return tab;
+  }
+
+  function updateTabAudio(tab) {
+    if (!tab || !tab.audioEl) return;
+    tab.button.classList.toggle('has-audio', !!tab.audioPlaying);
+    tab.audioEl.textContent = tab.audioMuted ? '🔇' : '🔊';
+    tab.audioEl.title = tab.audioMuted ? 'Unmute tab' : 'Mute tab';
+    tab.audioEl.setAttribute('aria-label', tab.audioMuted ? 'Unmute tab' : 'Mute tab');
+  }
+
+  function setActiveTab(tab) {
+    if (!tab) return;
+    activeTab = tab;
+    fr = tab.frame;
+    embedReady = tab.embedReady;
+    currentPageUrl = tab.url || '';
+    currentPageTitle = tab.title || '';
+    tabs.forEach(function (item) {
+      item.button.classList.toggle('active', item === tab);
+      item.frame.classList.toggle('active', item === tab);
+    });
+    if (tab.home || !tab.url) {
+      home.classList.remove('gone'); fw.classList.remove('on');
+      urlIn.value = ''; smsg.textContent = 'Ready'; document.title = 'IXL';
+    } else {
+      home.classList.add('gone'); fw.classList.add('on');
+      urlIn.value = tab.url.replace(/^https?:\/\//i, '');
+      smsg.textContent = tab.title || tabLabel(tab); document.title = 'IXL';
+    }
+    updateBookmarkButton();
+  }
+
+  function createTab() {
+    var frame = document.createElement('iframe');
+    frame.allow = 'fullscreen *';
+    fw.appendChild(frame);
+    var tab = registerTab(frame);
+    setActiveTab(tab);
+    return tab;
+  }
+
+  function closeTab(tab) {
+    if (!tab) return;
+    if (tabs.length === 1) { goHome(); return; }
+    var index = tabs.indexOf(tab);
+    if (index < 0) return;
+    var wasActive = tab === activeTab;
+    tab.button.remove(); tab.frame.remove(); tabs.splice(index, 1);
+    if (wasActive) setActiveTab(tabs[Math.max(0, index - 1)] || tabs[0]);
+  }
+
+  activeTab = registerTab(fr);
+  fr.classList.add('active');
+  activeTab.button.classList.add('active');
+  document.getElementById('new-tab').addEventListener('click', createTab);
+
+  // ── Address-bar parser ────────────────────────────────────────────────────
+  // Browsers treat host-like input as a URL even when the scheme is omitted.
+  // Keep that behavior here: youtube.com, www.youtube.com, localhost:8000,
+  // IPv4/IPv6 addresses, and hostnames with paths open directly; ordinary
+  // words and phrases still go to the search engine.
+  var SEARCH_URL = 'https://safe.duckduckgo.com/?q=';
+  var SAFE_SCHEMES = /^(https?):\/\//i;
+  var UNSAFE_SCHEMES = /^(javascript|data|file|about|blob|chrome|chrome-extension):/i;
+  var HOSTNAME = /^(?:localhost|[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+|(?:\d{1,3}\.){3}\d{1,3}|\[[0-9a-f:]+\])(?::\d{1,5})?(?:[/?#].*)?$/i;
+
+  function searchUrl(value) {
+    return SEARCH_URL + encodeURIComponent(value);
+  }
+
+  function looksLikeHost(value) {
+    if (!value || /\s/.test(value)) return false;
+    // URL() validates ports and brackets more accurately than a regex alone.
+    if (!HOSTNAME.test(value)) return false;
+    try {
+      var candidate = new URL('https://' + value);
+      return !!candidate.hostname && (!candidate.port || Number(candidate.port) >= 1 && Number(candidate.port) <= 65535);
+    } catch (_) { return false; }
+  }
+
+  function fix(raw) {
+    var value = String(raw || '').trim().replace(/^["']|["']$/g, '');
+    if (!value) return null;
+
+    // Convenient explicit search forms: ?query, search:query, or /search query.
+    if (/^\?/.test(value)) return searchUrl(value.slice(1).trim());
+    if (/^search:/i.test(value)) return searchUrl(value.slice(7).trim());
+
+    if (UNSAFE_SCHEMES.test(value)) return null;
+    if (/^\/\//.test(value)) value = 'https:' + value;
+
+    if (SAFE_SCHEMES.test(value)) {
+      try {
+        var explicit = new URL(value);
+        if (explicit.hostname) return explicit.href;
+      } catch (_) { return null; }
+      return null;
+    }
+
+    // A scheme-less host is a direct navigation, not a search query.
+    if (looksLikeHost(value)) {
+      try { return new URL('https://' + value).href; } catch (_) { return null; }
+    }
+
+    // Whitespace or a single word is treated as a DuckDuckGo query.
+    return searchUrl(value);
+  }
+
+  // ── postMessage from embed.html ────────────────────────────────────────────
+  // embed.html fires nexus-nav whenever the URL changes inside the session.
+  // e.url is the real decoded URL (scramjet's urlchange event gives us this directly).
+  window.addEventListener('message', function (e) {
+    var d = e.data;
+    if (!d) return;
+    var sourceTab = tabForSource(e.source);
+    if (sourceTab) sourceTab.embedReady = true;
+    // Audio state is reported very frequently. Keep the console useful for
+    // transport diagnosis while still processing every audio update below.
+    if (d.type !== 'nexus-audio') log('received postMessage', d.type, d);
+
+    // Any message from the active iframe is proof its current embed instance
+    // is live. Messages from background tabs must not change the active tab.
+    if (sourceTab === activeTab) embedReady = true;
+
+    if (d.type === 'nexus-nav' && d.url) {
+      try {
+        var u   = new URL(d.url);
+        var resourceHost = u.hostname.toLowerCase();
+        var resourcePath = u.pathname.toLowerCase();
+        if (resourceHost.endsWith('.twitchcdn.net') || resourceHost.endsWith('.ttvnw.net') ||
+            /\.(m3u8|m3u|ts|m4s|mp4|webm|aac|mp3|jpg|jpeg|png|gif|webp|ico|svg|woff2?|ttf|css|js|json)$/.test(resourcePath) ||
+            resourcePath === '/fp' || resourcePath.indexOf('/fp/') === 0) {
+          log('ignored resource URL from embed', d.url);
+          return;
+        }
+        if (sourceTab) {
+          sourceTab.url = u.href;
+          sourceTab.title = d.title || u.hostname;
+          sourceTab.home = false;
+          updateTabLabel(sourceTab);
+        }
+        if (sourceTab && sourceTab !== activeTab) return;
+        embedReady = true;
+        var disp = u.hostname + (u.pathname !== '/' ? u.pathname : '');
+        // Don't stomp on the address bar while the user is actively
+        // editing it — a late/stale nav event (e.g. a title-mutation
+        // observer, or a load event that fires after the user has already
+        // started typing the next URL) would otherwise yank out whatever
+        // they're typing mid-keystroke. This is the "typing a new URL
+        // glitches out" bug.
+        if (document.activeElement !== urlIn) {
+          urlIn.value = disp;
+        } else {
+          log('suppressed address bar update — user is actively editing it', disp);
+        }
+        smsg.textContent = u.hostname;
+        sdot.classList.remove('spin');
+        currentPageUrl = u.href;
+        currentPageTitle = d.title || u.hostname;
+        rememberHistory(currentPageUrl, currentPageTitle);
+        updateBookmarkButton();
+        document.title = 'IXL';
+      } catch (e2) { err('failed to handle nexus-nav', e2, d); }
+    }
+
+    if (d.type === 'nexus-audio') {
+      if (sourceTab) {
+        sourceTab.audioPlaying = !!d.playing;
+        sourceTab.audioMuted = !!d.muted;
+        updateTabAudio(sourceTab);
+      }
+    }
+
+    if (d.type === 'nexus-error') {
+      warn('nexus-error from embed.html', d.message);
+      smsg.textContent = d.message || 'Error';
+      sdot.classList.remove('spin');
+    }
+
+  });
+
+  // ── send command to embed.html ─────────────────────────────────────────────
+  function cmd(c, extra) {
+    log('sending cmd to embed.html', c, extra);
+    try {
+      fr.contentWindow.postMessage(Object.assign({ type: 'nexus-cmd', cmd: c }, extra || {}), '*');
+    } catch (e) { err('cmd() failed to postMessage', c, e); }
+  }
+
+  // ── navigate ───────────────────────────────────────────────────────────────
+  var currentPageUrl = '';
+  var currentPageTitle = '';
+
+  var HISTORY_KEY = 'nexus-history-v1';
+  var BOOKMARKS_KEY = 'nexus-bookmarks-v1';
+  var libraryMode = 'history';
+  var historyItems = readLibrary(HISTORY_KEY);
+  var bookmarkItems = readLibrary(BOOKMARKS_KEY);
+
+  function readLibrary(key) {
+    try {
+      var parsed = JSON.parse(localStorage.getItem(key) || '[]');
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_) { return []; }
+  }
+
+  function writeLibrary(key, items) {
+    try { localStorage.setItem(key, JSON.stringify(items)); } catch (_) {}
+  }
+
+  function rememberHistory(url, title) {
+    if (!url || !/^https?:/i.test(url)) return;
+    var now = Date.now();
+    var existing = historyItems.find(function (item) { return item.url === url; });
+    historyItems = historyItems.filter(function (item) { return item.url !== url; });
+    historyItems.unshift({
+      url: url,
+      title: title || (existing && existing.title) || new URL(url).hostname,
+      at: now,
+      firstAt: (existing && existing.firstAt) || now,
+      visits: ((existing && existing.visits) || 0) + 1,
+    });
+    historyItems = historyItems.slice(0, 60);
+    writeLibrary(HISTORY_KEY, historyItems);
+  }
+
+  function isBookmarked(url) {
+    return bookmarkItems.some(function (item) { return item.url === url; });
+  }
+
+  function updateBookmarkButton() {
+    var button = document.getElementById('bmark');
+    if (!button) return;
+    button.textContent = isBookmarked(currentPageUrl) ? '★' : '☆';
+    button.classList.toggle('active', isBookmarked(currentPageUrl));
+    button.title = isBookmarked(currentPageUrl) ? 'Remove bookmark' : 'Bookmark this page';
+  }
+
+  function toggleBookmark() {
+    if (!currentPageUrl) { smsg.textContent = 'Open a page first'; return; }
+    if (isBookmarked(currentPageUrl)) {
+      bookmarkItems = bookmarkItems.filter(function (item) { return item.url !== currentPageUrl; });
+      smsg.textContent = 'Bookmark removed';
+    } else {
+      bookmarkItems.unshift({ url: currentPageUrl, title: currentPageTitle || new URL(currentPageUrl).hostname, at: Date.now() });
+      bookmarkItems = bookmarkItems.slice(0, 60);
+      smsg.textContent = 'Bookmarked';
+    }
+    writeLibrary(BOOKMARKS_KEY, bookmarkItems);
+    updateBookmarkButton();
+    if (libraryMode === 'bookmarks') renderLibrary();
+  }
+
+  function formatLibraryUrl(url) {
+    try { var u = new URL(url); return u.hostname + (u.pathname !== '/' ? u.pathname : ''); }
+    catch (_) { return url; }
+  }
+
+  function renderLibrary() {
+    var list = document.getElementById('library-list');
+    var title = document.getElementById('library-title');
+    var clear = document.getElementById('library-clear');
+    if (!list || !title || !clear) return;
+    var items = libraryMode === 'bookmarks' ? bookmarkItems : historyItems;
+    var search = String((document.getElementById('library-search') || {}).value || '').trim().toLowerCase();
+    if (search) items = items.filter(function (item) {
+      return String(item.title || '').toLowerCase().includes(search) || String(item.url || '').toLowerCase().includes(search);
+    });
+    title.textContent = libraryMode === 'bookmarks' ? 'Bookmarks' : 'History';
+    clear.textContent = libraryMode === 'bookmarks' ? 'Clear bookmarks' : 'Clear history';
+    document.querySelectorAll('.library-tab').forEach(function (tab) {
+      tab.classList.toggle('active', tab.dataset.libraryMode === libraryMode);
+    });
+    list.innerHTML = '';
+    if (!items.length) {
+      list.innerHTML = '<div class="library-empty">Nothing here yet.</div>';
+      return;
+    }
+    items.forEach(function (item, index) {
+      var row = document.createElement('div'); row.className = 'library-item';
+      var open = document.createElement('button'); open.className = 'library-open'; open.dataset.openUrl = item.url;
+      var itemTitle = document.createElement('span'); itemTitle.className = 'library-title'; itemTitle.textContent = item.title || formatLibraryUrl(item.url);
+      var itemUrl = document.createElement('span'); itemUrl.className = 'library-url'; itemUrl.textContent = formatLibraryUrl(item.url);
+      var itemMeta = document.createElement('span'); itemMeta.className = 'library-url';
+      itemMeta.textContent = libraryMode === 'history'
+        ? new Date(item.at || Date.now()).toLocaleString() + ' · ' + (item.visits || 1) + ((item.visits || 1) === 1 ? ' visit' : ' visits')
+        : 'Saved ' + new Date(item.at || Date.now()).toLocaleString();
+      open.appendChild(itemTitle); open.appendChild(itemUrl); open.appendChild(itemMeta); row.appendChild(open);
+      var remove = document.createElement('button'); remove.className = 'library-remove'; remove.dataset.removeIndex = String(index); remove.setAttribute('aria-label', 'Remove'); remove.textContent = '×'; row.appendChild(remove);
+      list.appendChild(row);
+    });
+  }
+
+  function openLibrary(mode) {
+    libraryMode = mode === 'bookmarks' ? 'bookmarks' : 'history';
+    renderLibrary();
+    var overlay = document.getElementById('library-overlay');
+    overlay.classList.add('open'); overlay.setAttribute('aria-hidden', 'false');
+  }
+
+  function closeLibrary() {
+    var overlay = document.getElementById('library-overlay');
+    overlay.classList.remove('open'); overlay.setAttribute('aria-hidden', 'true');
+  }
+
+  function nav(raw) {
+    var url = fix(raw);
+    if (!url) { warn('nav() got an invalid URL', raw); smsg.textContent = 'Invalid URL'; return; }
+    log('nav() called', { raw: raw, resolved: url });
+
+    if (activeTab) {
+      activeTab.url = url;
+      activeTab.title = '';
+      activeTab.home = false;
+      updateTabLabel(activeTab);
+      currentPageUrl = url;
+      currentPageTitle = '';
+    }
+
+    sdot.classList.add('spin');
+    smsg.textContent = 'Connecting…';
+    urlIn.value = url.replace(/^https?:\/\//i, '');
+
+    home.classList.add('gone');
+    fw.classList.add('on');
+
+    // If the iframe already has a live embed.html loaded, send a go
+    // command so we don't reload the whole embed page (keeps the SW alive)
+    log('nav() embedReady =', embedReady);
+
+    if (embedReady) {
+      cmd('go', { url: url });
+    } else {
+      // Keep the destination out of the visible fragment as a URL-safe
+      // base64 token. This is an encoding layer, not encryption.
+      var encodedTarget = 'b64.' + encodeUrlToken(url);
+    var src = NEXUS_BASE + 'embed.html#' + encodedTarget;
+      var params = [];
+      params.push('clean=' + (cleanEnabled ? '1' : '0'));
+      if (restrictParam) params.push('restrict=' + encodeURIComponent(restrictParam));
+      if (cleanSelector) params.push('remove_selector=' + encodeURIComponent(cleanSelector));
+      if (useHttpBridge) params.push('httpbridge=1');
+      if (useHttpBridge && useHttpBridgeWsOnly) params.push('httpbridgews=1');
+      params.push('adblock=' + (adblockEnabled ? '1' : '0'));
+      if (socksEnabled) params.push('socks=1');
+      if (params.length) src = NEXUS_BASE + 'embed.html?' + params.join('&') + '#' + encodedTarget;
+      log('nav() setting fr.src (fresh embed.html load)', src);
+      embedReady = false;
+      if (activeTab) activeTab.embedReady = false;
+      fr.src = src;
+    }
+  }
+
+  function goHome() {
+    if (activeTab) { activeTab.home = true; activeTab.url = ''; activeTab.title = ''; updateTabLabel(activeTab); }
+    home.classList.remove('gone');
+    fw.classList.remove('on');
+    // Don't unload embed.html — keep the SW and transport alive in the background
+    urlIn.value = '';
+    smsg.textContent = 'Ready';
+    sdot.classList.remove('spin');
+    document.title = 'IXL';
+  }
+
+  // ── event wiring ───────────────────────────────────────────────────────────
+  document.getElementById('go').onclick    = function () { nav(urlIn.value); };
+  document.getElementById('hgo').onclick   = function () { nav(hIn.value); };
+  urlIn.addEventListener('keydown', function (e) { if (e.key === 'Enter') nav(urlIn.value); });
+  hIn.addEventListener('keydown',   function (e) { if (e.key === 'Enter') nav(hIn.value); });
+
+  // Select-all when focusing the address bar while browsing
+  urlIn.addEventListener('focus', function () { urlIn.select(); });
+
+  document.querySelectorAll('.qi').forEach(function (el) {
+    el.onclick = function () { nav(el.dataset.url); };
+  });
+
+  document.getElementById('bhome').onclick   = goHome;
+  document.getElementById('logo').onclick    = goHome;
+  document.getElementById('bback').onclick   = function () { cmd('back'); };
+  document.getElementById('bforward').onclick = function () { cmd('forward'); };
+  document.getElementById('breload').onclick = function () { cmd('reload'); };
+  document.getElementById('bfs').onclick     = function () {
+    var el = document.getElementById('shell');
+    if (!document.fullscreenElement) el.requestFullscreen && el.requestFullscreen();
+    else document.exitFullscreen && document.exitFullscreen();
+  };
+  document.getElementById('bmark').onclick = toggleBookmark;
+  document.getElementById('nav-home').onclick = goHome;
+  document.getElementById('nav-history').onclick = function () { openLibrary('history'); };
+  document.getElementById('nav-bookmarks').onclick = function () { openLibrary('bookmarks'); };
+  document.getElementById('library-close').onclick = closeLibrary;
+  document.getElementById('library-overlay').onclick = function (e) {
+    if (e.target.id === 'library-overlay') closeLibrary();
+  };
+  document.querySelectorAll('.library-tab').forEach(function (tab) {
+    tab.onclick = function () { openLibrary(tab.dataset.libraryMode); };
+  });
+  document.getElementById('library-clear').onclick = function () {
+    if (libraryMode === 'bookmarks') {
+      bookmarkItems = []; writeLibrary(BOOKMARKS_KEY, bookmarkItems); updateBookmarkButton();
+    } else {
+      historyItems = []; writeLibrary(HISTORY_KEY, historyItems);
+    }
+    renderLibrary();
+  };
+  document.getElementById('library-list').onclick = function (e) {
+    var open = e.target.closest('.library-open');
+    if (open) { closeLibrary(); nav(open.dataset.openUrl); return; }
+    var remove = e.target.closest('.library-remove');
+    if (!remove) return;
+    var index = Number(remove.dataset.removeIndex);
+    if (libraryMode === 'bookmarks') {
+      bookmarkItems.splice(index, 1); writeLibrary(BOOKMARKS_KEY, bookmarkItems); updateBookmarkButton();
+    } else {
+      historyItems.splice(index, 1); writeLibrary(HISTORY_KEY, historyItems);
+    }
+    renderLibrary();
+  };
+
+  document.getElementById('bsettings').onclick = function (e) {
+    e.stopPropagation();
+    settingsPanel.classList.toggle('open');
+    if (settingsPanel.classList.contains('open')) useHttpBridgeInput.focus();
+  };
+  document.addEventListener('click', function (e) {
+    if (settingsWrap && !settingsWrap.contains(e.target)) settingsPanel.classList.remove('open');
+  });
+  settingsPanel.addEventListener('click', function (e) { e.stopPropagation(); });
+  document.getElementById('settings-apply').onclick = function () {
+    useHttpBridge = !!useHttpBridgeInput.checked;
+    useHttpBridgeWsOnly = useHttpBridge && !!useHttpBridgeWsOnlyInput.checked;
+    adblockEnabled = !!useAdblockInput.checked;
+    socksEnabled = !!useSocksInput.checked;
+    try { localStorage.setItem('nexus-httpbridge-setting', useHttpBridge ? '1' : '0'); } catch (_) {}
+    try { localStorage.setItem('nexus-httpbridge-ws-setting', useHttpBridgeWsOnly ? '1' : '0'); } catch (_) {}
+    try { localStorage.setItem('nexus-adblock-setting', adblockEnabled ? '1' : '0'); } catch (_) {}
+    try { localStorage.setItem('nexus-socks-setting', socksEnabled ? '1' : '0'); } catch (_) {}
+    if (activeTab && activeTab.embedReady) cmd('setAdblock', { enabled: adblockEnabled });
+    smsg.textContent = adblockEnabled ? 'Ad blocker enabled' : 'Ad blocker disabled';
+    settingsPanel.classList.remove('open');
+  };
+  document.getElementById('settings-reset').onclick = function () {
+    useHttpBridgeInput.checked = true;
+    useHttpBridgeWsOnlyInput.checked = false;
+    useHttpBridge = true;
+    useHttpBridgeWsOnly = false;
+    adblockEnabled = true;
+    useAdblockInput.checked = true;
+    socksEnabled = false;
+    useSocksInput.checked = false;
+    try { localStorage.setItem('nexus-httpbridge-setting', '1'); } catch (_) {}
+    try { localStorage.setItem('nexus-httpbridge-ws-setting', '0'); } catch (_) {}
+    try { localStorage.setItem('nexus-adblock-setting', '1'); } catch (_) {}
+    try { localStorage.setItem('nexus-socks-setting', '0'); } catch (_) {}
+    settingsPanel.classList.remove('open');
+  };
+  useHttpBridgeInput.addEventListener('change', function () {
+    useHttpBridgeWsOnlyInput.disabled = !useHttpBridgeInput.checked;
+    if (!useHttpBridgeInput.checked) useHttpBridgeWsOnlyInput.checked = false;
+  });
+
+  // Familiar browser shortcuts while the normal Nexus page is focused.
+  document.addEventListener('keydown', function (e) {
+    var tag = (e.target && e.target.tagName || '').toLowerCase();
+    var editing = tag === 'input' || tag === 'textarea' || e.target.isContentEditable;
+    if (e.altKey && e.key === 'ArrowLeft') {
+      e.preventDefault(); cmd('back');
+    } else if (e.altKey && e.key === 'ArrowRight') {
+      e.preventDefault(); cmd('forward');
+    } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'l') {
+      e.preventDefault(); urlIn.focus(); urlIn.select();
+    } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'r' && !editing) {
+      e.preventDefault(); cmd('reload');
+    }
+  });
+
+  document.getElementById('library-search').addEventListener('input', renderLibrary);
+
+  // Direct hash navigation: /#https://example.com
+  var h = location.hash.slice(1).trim();
+  if (h) { log('direct hash navigation on load', h); nav(decodeUrlToken(h)); }
+})();
+</script>
+</body>
+</html>

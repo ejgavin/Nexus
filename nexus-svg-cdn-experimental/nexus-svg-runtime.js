@@ -9,17 +9,17 @@
 
   const cfg = window.__NEXUS_SVG__ || {};
   const query = new URLSearchParams(location.search);
-  const appOrigin = (query.get('app') || location.origin).replace(/\/+$/, '');
+  const appOrigin = (query.get('app') || cfg.defaultApp || new URL('./', location.href).href).replace(/\/+$/, '');
   const runtimeRoot = (query.get('runtime') || cfg.cdn || appOrigin).replace(/\/+$/, '');
   const backend = (query.get('backend') || 'https://somestuffserver.koyeb.app').replace(/\/+$/, '');
   const bridge = backend + '/api/wsbridge/';
   const root = document.getElementById('nexus-svg-root');
   if (!root) return;
 
-  const safeOrigin = value => {
-    try { return new URL(value).origin; } catch (_) { return location.origin; }
+  const safeBase = value => {
+    try { return new URL(value).href.replace(/\/+$/, ''); } catch (_) { return new URL('./', location.href).href.replace(/\/+$/, ''); }
   };
-  const app = safeOrigin(appOrigin);
+  const app = safeBase(appOrigin);
   const b64url = value => {
     const bytes = new TextEncoder().encode(value);
     let binary = '';

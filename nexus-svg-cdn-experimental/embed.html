@@ -1,0 +1,1049 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>IXL</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23006fba'/%3E%3Ctext x='32' y='42' text-anchor='middle' font-family='Arial,sans-serif' font-size='28' font-weight='700' fill='white'%3EIXL%3C/text%3E%3C/svg%3E"/>
+  <script>var NEXUS_BASE = new URL('./', location.href).pathname;</script>
+  <!-- Keep transport diagnostics visible. The bridge and service-worker
+       lifecycle logs are needed to distinguish a backend failure from a
+       proxied page's own JavaScript errors. -->
+  <script>
+    // Direct /embed.html visits need the same old-worker migration as the
+    // landing page. The session marker prevents a reload loop.
+    window.__nexusSwMigration = (async function () {
+      try {
+        var marker = 'nexus-sw-migration-math-v5-wsdiag';
+        if (sessionStorage.getItem(marker) === '1') return;
+        var registrations = await navigator.serviceWorker.getRegistrations();
+        var stale = registrations.filter(function (registration) {
+          var worker = registration.active || registration.waiting || registration.installing;
+          return worker && new URL(worker.scriptURL).pathname === NEXUS_BASE + '1k123.js' && !/build=math-v5-wsdiag(?:&|$)/.test(worker.scriptURL);
+        });
+        if (!stale.length) return;
+        sessionStorage.setItem(marker, '1');
+        await Promise.all(stale.map(function (registration) { return registration.unregister(); }));
+        location.reload();
+        await new Promise(function () {});
+      } catch (_) {}
+    })();
+  </script>
+  <style>
+    body,html{margin:0;padding:0;width:100vw;height:100vh;overflow:hidden;background:#020810}
+    #container{width:100%;height:100%}
+    #container iframe{width:100%;height:100%;border:none;background:#fff}
+    #status{position:fixed;inset:0;display:grid;place-items:center;pointer-events:none;
+      z-index:2;background:#020810;transition:opacity .25s}
+    #status.hide{opacity:0;pointer-events:none}
+    #status p{margin:0;font-size:13px;color:#6a85b0;font-family:system-ui,sans-serif;letter-spacing:.03em}
+
+    /* Persistent lock indicator — always visible while restriction is active */
+    #lock-banner{
+      position:fixed;top:10px;left:10px;z-index:6;display:none;align-items:center;gap:6px;
+      padding:6px 12px 6px 10px;border-radius:20px;
+      background:rgba(11,20,40,.92);border:1px solid rgba(90,150,255,.35);
+      box-shadow:0 4px 16px rgba(0,0,0,.35);
+      color:#8fb3ff;font:600 11px/1 system-ui,-apple-system,sans-serif;letter-spacing:.02em;
+      backdrop-filter:blur(6px);
+      max-width:min(80vw,380px);
+    }
+    #lock-banner.show{display:flex}
+    #lock-banner .lb-icon{flex-shrink:0;width:13px;height:13px;color:#60a5fa;display:flex;align-items:center;justify-content:center}
+    #lock-banner .lb-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+    /* Domain-restriction "snapped back" toast */
+    #restrict-toast{
+      position:fixed;top:14px;left:50%;transform:translateX(-50%) translateY(-12px);
+      z-index:5;display:flex;align-items:center;gap:8px;
+      padding:9px 16px;border-radius:10px;
+      background:rgba(11,20,40,.96);border:1px solid rgba(90,150,255,.4);
+      box-shadow:0 8px 28px rgba(0,0,0,.45), 0 0 0 3px rgba(59,126,246,.08);
+      color:#c8d8f0;font:500 12.5px/1.4 system-ui,-apple-system,sans-serif;
+      opacity:0;pointer-events:none;transition:opacity .22s ease,transform .22s ease;
+      max-width:min(92vw,460px);
+    }
+    #restrict-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+    #restrict-toast{display:flex;align-items:center;gap:8px;pointer-events:none}
+    #restrict-toast .rt-icon{
+      flex-shrink:0;width:16px;height:16px;color:#60a5fa;display:flex;align-items:center;justify-content:center;
+    }
+    #restrict-toast .rt-text b{color:#60a5fa;font-weight:700}
+    #restrict-toast .rt-close{margin-left:3px;width:20px;height:20px;border:0;border-radius:5px;background:transparent;color:#8fa8c9;font:700 16px/18px system-ui;cursor:pointer;pointer-events:auto}
+    #restrict-toast .rt-close:hover{background:rgba(255,255,255,.1);color:#fff}
+  </style>
+  <script>
+    // ── debug logger (shared with the retry loop below, must be defined
+    // before the IDB reset IIFE so it can log its own steps) ────────────
+    window.__nexusLog = (function () {
+      // Diagnostics are deliberately on in this build. Filter by
+      // [Nexus:embed] to separate shell logs from proxied-page logs.
+      var DEBUG = true;
+      function log(msg)  { if (DEBUG) console.log('%c[Nexus:embed]', 'color:#22d3ee;font-weight:700', msg, arguments.length > 1 ? Array.prototype.slice.call(arguments, 1) : ''); }
+      function warn(msg) { console.warn('%c[Nexus:embed]', 'color:#f97316;font-weight:700', msg, arguments.length > 1 ? Array.prototype.slice.call(arguments, 1) : ''); }
+      function err(msg)  { console.error('%c[Nexus:embed]', 'color:#ef4444;font-weight:700', msg, arguments.length > 1 ? Array.prototype.slice.call(arguments, 1) : ''); }
+      return { log: log, warn: warn, err: err };
+    })();
+
+    // ── Guaranteed IDB schema ──────────────────────────────────────────────
+    // Scramjet's bundle has multiple call sites that all do
+    // `indexedDB.open("$scramjet", 1, ...)`, but only ONE of them (openIDB(),
+    // used by the page-side controller) actually passes an `upgrade`
+    // callback that creates the five object stores. Several others —
+    // including one fired unconditionally, unawaited, with no try/catch,
+    // straight out of the ScramjetServiceWorker CONSTRUCTOR — open the same
+    // db/version with NO upgrade callback at all. Whichever of these opens
+    // a nonexistent "$scramjet" database FIRST wins the one-time
+    // onupgradeneeded event. If it's one of the callback-less ones, the
+    // stores never get created, the db is permanently stuck at version 1
+    // with zero stores (upgrade() can't re-run without a version bump we
+    // don't control), and every real operation afterward throws
+    // "NotFoundError: ... object store was not found" forever. This was a
+    // pure coin-flip race, which is why deleting-and-recreating the db
+    // "fixed" it sometimes and silently re-broke it other times.
+    //
+    // Fix: don't leave it to chance. Deterministically create the correct
+    // schema ourselves, unconditionally, before Scramjet's own code gets a
+    // chance to lose that race. This is safe to run on every single page
+    // load — opening an already-correctly-schemaed db at a matching
+    // version is a no-op (upgrade() simply doesn't fire), so it never
+    // touches or wipes existing cookies/config data.
+    window.__nexusIdbReady = new Promise(function (resolve) {
+      var L = window.__nexusLog;
+      try {
+        var req = indexedDB.open('$scramjet', 1);
+        req.onupgradeneeded = function (ev) {
+          var db = ev.target.result;
+          ['config', 'cookies', 'redirectTrackers', 'referrerPolicies', 'publicSuffixList'].forEach(function (name) {
+            if (!db.objectStoreNames.contains(name)) db.createObjectStore(name);
+          });
+          L.log('IDB schema created/verified (won the race against Scramjet\'s own no-upgrade-callback open calls)');
+        };
+        req.onsuccess = function (ev) {
+          try { ev.target.result.close(); } catch (e) {}
+          resolve();
+        };
+        req.onerror = function () {
+          L.err('IDB schema-guarantee open failed', req.error);
+          resolve(); // don't hang the page over this
+        };
+      } catch (e) {
+        L.err('IDB schema-guarantee threw synchronously', e);
+        resolve();
+      }
+    });
+  </script>
+  <script src="./m4thx/index.js"></script>
+  <script src="./q9vx/sj.all.js"></script>
+  <script src="./config.js"></script>
+</head>
+<body>
+<div id="status"><p>Loading…</p></div>
+<div id="restrict-toast" role="status" aria-live="polite">
+  <span class="rt-icon">⌁</span><span id="restrict-toast-text" class="rt-text"></span>
+  <button id="restrict-close" class="rt-close" type="button" aria-label="Close restriction notice">×</button>
+</div>
+
+<div id="container"></div>
+<script>
+(function () {
+  var L = window.__nexusLog;
+  var log = L.log, warn = L.warn, err = L.err;
+  function transportErrorDetails(error) {
+    if (!error) return 'unknown error';
+    return error.name + ': ' + (error.message || String(error));
+  }
+  log('embed.html script starting', location.href);
+
+  function c(a) { return a.map(function(n){ return String.fromCharCode(n); }).join(''); }
+  var SJLoad  = c([36,115,99,114,97,109,106,101,116,76,111,97,100,67,111,110,116,114,111,108,108,101,114]);
+  var SJCtrl  = c([83,99,114,97,109,106,101,116,67,111,110,116,114,111,108,108,101,114]);
+  var BMux    = c([66,97,114,101,77,117,120]);
+  var BMuxCon = c([66,97,114,101,77,117,120,67,111,110,110,101,99,116,105,111,110]);
+  var setT    = c([115,101,116,84,114,97,110,115,112,111,114,116]);
+  var wispKey = c([119,105,115,112]);
+  var mkFrame = c([99,114,101,97,116,101,70,114,97,109,101]);
+
+  // ── domain restriction ──────────────────────────────────────────────────────
+  // ?restrict=chat.example.com
+  // A hostname matches itself and every subdomain below it. Multiple hosts
+  // may still be comma-separated for compatibility.
+  // Restriction applies to top-level navigation inside the proxied frame AND
+  // to window.open()/target=_blank popups (enforced inside the proxied page's
+  // own runtime via restrictPatterns baked into the Scramjet config below) —
+  // subresources (images, scripts, embedded cross-origin content the page
+  // itself loads) are untouched, so the page still renders normally.
+  var qs = new URLSearchParams(location.search);
+  var restrictRaw = qs.get('restrict') || qs.get('domain_restrict') || '';
+
+  function parseRestrictionList(raw) {
+    if (!raw) return [];
+    return raw.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+  }
+
+  var restrictPatterns = parseRestrictionList(restrictRaw);
+  if (restrictPatterns.length) log('domain restriction active', restrictPatterns);
+
+  // ── proxied-page element cleanup ─────────────────────────────────────────
+  // Enable with ?clean=1, ?remove=branding, or ?remove_element=1. A custom
+  // selector can be supplied with ?remove_selector=.banner. The default rule
+  // targets the FrogiesArcade bypass badge by both selector and exact text so
+  // it keeps working if the page's generated class names change.
+  function cleanFlag(value) {
+    return /^(1|true|yes|on|branding|default)$/i.test(String(value || '').trim());
+  }
+  var cleanSelector = qs.get('remove_selector') || qs.get('selector') || '';
+  var cleanParam = qs.get('clean') || qs.get('remove') || qs.get('remove_element');
+  var cleanEnabled = cleanParam === null ? true : cleanFlag(cleanParam) || !!cleanSelector;
+  var adblockEnabled = qs.get('adblock') !== '0' && localStorage.getItem('nexus-adblock-setting') !== '0';
+  var socksEnabled = qs.get('socks') === '1' || localStorage.getItem('nexus-socks-setting') === '1';
+  var removalConfig = (typeof _CONFIG !== 'undefined' && _CONFIG.elementRemoval) || {};
+  var defaultRemovalSelector = removalConfig.defaultSelector || 'span.sc-3c372983-24.sc-90a29998-9.jWXiqP.ctujSw';
+  var defaultRemovalText = removalConfig.defaultText || 'bypass by frogiesarcade.net | discord.gg/unblockedgames';
+  var cleanObserver = null;
+  var audioObserver = null;
+  var audioMedia = [];
+  var adblockObserver = null;
+  var cleanFrameDocument = null;
+  var newTabGuardDocument = null;
+
+  function activeCleanSelectors() {
+    var selectors = [];
+    if (cleanEnabled) selectors.push(defaultRemovalSelector);
+    if (cleanSelector) selectors.push(cleanSelector);
+    return selectors;
+  }
+
+  function cleanProxiedDocument(doc) {
+    if (!doc || !cleanEnabled) return;
+    activeCleanSelectors().forEach(function (selector) {
+      try {
+        doc.querySelectorAll(selector).forEach(function (el) { el.remove(); });
+      } catch (e) { warn('invalid cleanup selector ignored', selector); }
+    });
+    // Text fallback is deliberately limited to leaf elements so a matching
+    // badge never removes the page's larger layout container.
+    if (defaultRemovalText) {
+      try {
+        doc.querySelectorAll('span,div,p').forEach(function (el) {
+          if (el.children.length === 0 && el.textContent.trim() === defaultRemovalText) el.remove();
+        });
+      } catch (e) {}
+    }
+  }
+
+  var adblockHostPattern = /(^|\.)(doubleclick\.net|googlesyndication\.com|googleadservices\.com|adservice\.google\.(com|co\.[a-z]{2})|googletagservices\.com|amazon-adsystem\.com|adsrvr\.org|adnxs\.com|criteo\.com|taboola\.com|outbrain\.com|pubmatic\.com|rubiconproject\.com|openx\.net|casalemedia\.com|33across\.com|sharethrough\.com|yieldmo\.com|moatads\.com|scorecardresearch\.com|quantserve\.com|adform\.net|zedo\.com|smaato\.net|smartadserver\.com|media\.net)$/i;
+  var adblockCompatibilityHost = /(^|\.)(youtube\.com|youtube-nocookie\.com|ytimg\.com|googlevideo\.com|googleusercontent\.com|accounts\.google\.com|gstatic\.com)$/i;
+  var adblockPathPattern = /(^|[\/_-])(ads?|adserver|advert|advertising|banner|doubleclick|gpt|prebid|taboola|outbrain|sponsor)([\/_\-.]|$)/i;
+  var adblockSelector = '[id*="ad-container" i],[id*="advert" i],[id*="ad-slot" i],[class*="ad-container" i],[class*="advertisement" i],[class*="ad-banner" i],[class*="ad-slot" i],[class*="adsbygoogle" i],[class*="sponsor-message" i]';
+
+  function adblockDecodedUrl(value) {
+    if (!value) return '';
+    var raw = String(value);
+    try {
+      var candidate = new URL(raw, location.href);
+      var prefix = location.origin + SJ_CONFIG.prefix;
+      if (candidate.href.indexOf(prefix) === 0) {
+        try { raw = engine.decodeUrl(candidate.href); } catch (_) {}
+      }
+    } catch (_) {}
+    return raw;
+  }
+
+  function isAdblockUrl(value) {
+    try {
+      var decoded = adblockDecodedUrl(value);
+      var url = new URL(decoded, location.href);
+      if (adblockCompatibilityHost.test(url.hostname)) return false;
+      return adblockHostPattern.test(url.hostname) || adblockPathPattern.test(url.pathname + url.search);
+    } catch (_) { return false; }
+  }
+
+  // YouTube uses many legitimate elements whose names contain "ad" or
+  // "advert". Do not apply generic DOM selectors to YouTube itself; the
+  // service-worker network rules still block known third-party ad hosts.
+  function isYouTubeDocument(doc, fallbackUrl) {
+    try {
+      var value = (doc && (doc.URL || (doc.location && doc.location.href))) || fallbackUrl || '';
+      value = adblockDecodedUrl(value);
+      return /(^|\.)youtube(?:-nocookie)?\.com$/i.test(new URL(value, location.href).hostname);
+    } catch (_) { return false; }
+  }
+
+  function blockAdElement(el) {
+    if (!el || el.nodeType !== 1 || el.getAttribute('data-nexus-adblocked') === '1') return;
+    el.setAttribute('data-nexus-adblocked', '1');
+    el.remove();
+  }
+
+  function blockAdsInDocument(doc, pageUrl) {
+    if (!adblockEnabled || !doc) return;
+    if (isYouTubeDocument(doc, pageUrl)) return;
+    try { doc.querySelectorAll(adblockSelector).forEach(blockAdElement); } catch (_) {}
+    try {
+      doc.querySelectorAll('script[src],iframe[src],img[src],video[src],audio[src],source[src],link[href]').forEach(function (el) {
+        var value = el.getAttribute('src') || el.getAttribute('href') || '';
+        if (isAdblockUrl(value)) blockAdElement(el);
+      });
+    } catch (_) {}
+  }
+
+  function watchProxiedDocument(frameEl, pageUrl) {
+    if (cleanObserver) { try { cleanObserver.disconnect(); } catch (e) {} cleanObserver = null; }
+    if (audioObserver) { try { audioObserver.disconnect(); } catch (e) {} audioObserver = null; }
+    if (adblockObserver) { try { adblockObserver.disconnect(); } catch (e) {} adblockObserver = null; }
+    audioMedia = [];
+    if (newTabGuardDocument) {
+      try { newTabGuardDocument.removeEventListener('click', newTabGuardHandler, true); } catch (e) {}
+      try { newTabGuardDocument.removeEventListener('submit', popupSubmitHandler, true); } catch (e) {}
+      newTabGuardDocument = null;
+    }
+    cleanFrameDocument = null;
+    if (!frameEl) return;
+    var doc = null;
+    try { doc = frameEl.contentDocument; } catch (e) {}
+    if (!doc) return;
+    cleanFrameDocument = doc;
+    if (cleanEnabled) cleanProxiedDocument(doc);
+    blockAdsInDocument(doc, pageUrl);
+    try {
+      adblockObserver = new MutationObserver(function () { blockAdsInDocument(doc, pageUrl); });
+      if (adblockEnabled && doc.documentElement) adblockObserver.observe(doc.documentElement, { childList: true, subtree: true });
+    } catch (e) { warn('ad blocker observer unavailable', e); }
+    function reportAudio() {
+      var playing = audioMedia.some(function (el) { return !el.paused && !el.ended; });
+      var muted = audioMedia.length > 0 && audioMedia.every(function (el) { return el.muted; });
+      window.parent.postMessage({ type: 'nexus-audio', playing: playing, muted: muted }, '*');
+    }
+    function attachAudio() {
+      doc.querySelectorAll('audio,video').forEach(function (el) {
+        if (audioMedia.indexOf(el) !== -1) return;
+        audioMedia.push(el);
+        ['play', 'pause', 'ended', 'volumechange'].forEach(function (eventName) {
+          el.addEventListener(eventName, reportAudio);
+        });
+      });
+      reportAudio();
+    }
+    attachAudio();
+    try {
+      audioObserver = new MutationObserver(attachAudio);
+      if (doc.documentElement) audioObserver.observe(doc.documentElement, { childList: true, subtree: true });
+    } catch (e) { warn('audio observer unavailable', e); }
+    // Keep all popup behavior inside the current browsing tab. This is always
+    // enabled, not just when a domain restriction is active.
+    newTabGuardDocument = doc;
+    doc.addEventListener('click', newTabGuardHandler, true);
+    doc.addEventListener('submit', popupSubmitHandler, true);
+    try {
+      var proxiedWindow = frameEl.contentWindow;
+      proxiedWindow.open = function (value) {
+        if (!value || !frame) return null;
+        var targetUrl = String(value);
+        try {
+          var pageBase = frame && frame.url ? frame.url.href : '';
+          targetUrl = new URL(targetUrl, pageBase || targetUrl).href;
+        } catch (_) {}
+        try {
+          var appPrefix = location.origin + SJ_CONFIG.prefix;
+          if (targetUrl.indexOf(appPrefix) === 0) targetUrl = engine.decodeUrl(targetUrl);
+        } catch (_) {}
+        try { frame.go(targetUrl); } catch (e) { err('popup-to-current-tab navigation failed', e); }
+        return null;
+      };
+    } catch (e) { warn('popup guard could not be installed', e); }
+    try {
+      if (cleanEnabled && doc.documentElement) {
+        cleanObserver = new MutationObserver(function () { cleanProxiedDocument(doc); });
+        cleanObserver.observe(doc.documentElement, { childList: true, subtree: true });
+      }
+    } catch (e) { warn('page cleanup observer unavailable', e); }
+  }
+
+  function newTabGuardHandler(event) {
+    var node = event.target;
+    while (node && node.tagName !== 'A') node = node.parentElement;
+    var rawHref = node && node.getAttribute('href');
+    if (!rawHref || /^(#|javascript:|mailto:|tel:|data:)/i.test(rawHref)) return;
+    var targetUrl = node.href || rawHref;
+    try {
+      var pageBase = frame && frame.url ? frame.url.href : '';
+      targetUrl = new URL(rawHref, pageBase || targetUrl).href;
+    } catch (_) {}
+    try {
+      var appPrefix = location.origin + SJ_CONFIG.prefix;
+      if (targetUrl.indexOf(appPrefix) === 0) targetUrl = engine.decodeUrl(targetUrl);
+    } catch (_) {}
+    if (isRestrictionActive() && !isUrlAllowed(targetUrl)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      showRestrictToast();
+      log('restriction blocked clicked link', targetUrl);
+      return;
+    }
+    var target = (node.getAttribute('target') || '').toLowerCase();
+    if (target === '_blank' || target === '_new') {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      log('forced new-tab link into current tab', targetUrl);
+      if (frame && targetUrl) {
+        try { frame.go(targetUrl); } catch (e) { err('current-tab link navigation failed', e); }
+      }
+    }
+  }
+
+  function popupSubmitHandler(event) {
+    var form = event.target;
+    if (!form || !/^_(blank|new)$/i.test(String(form.getAttribute('target') || ''))) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    var targetUrl = form.getAttribute('action') || (frame && frame.url ? frame.url.href : '');
+    try {
+      targetUrl = new URL(targetUrl, frame && frame.url ? frame.url.href : location.href).href;
+    } catch (_) {}
+    log('forced new-tab form into current tab', targetUrl);
+    if (frame && targetUrl) {
+      try { frame.go(targetUrl); } catch (e) { err('form popup navigation failed', e); }
+    }
+  }
+
+  // The full scramjet config — must match what we send to the SW.
+  // restrictPatterns rides along inside this object: it propagates through
+  // the browser-side controller into IndexedDB, into the SW's own config
+  // copy, and gets baked into every proxied page via the injected
+  // loadAndHook(JSON.stringify(config)) bootstrap — making it readable from
+  // inside the proxied page's own runtime, which is what the patched
+  // window.open hook (in sj.all.js) checks against for popup blocking.
+  // Google and a few other large sites intentionally retry CSS registration
+  // during startup. Scramjet's captureErrors hook turns that site-side
+  // exception into a repeated "CAUGHT ERROR" console warning, even when the
+  // page continues normally. Keep that noisy hook off for normal browsing;
+  // append ?scramjeterrors=1 when debugging a site's rewritten exceptions.
+  var scramjetErrorCapture = false;
+  try {
+    scramjetErrorCapture = new URLSearchParams(location.search).get('scramjeterrors') === '1' ||
+      localStorage.getItem('nexus-scramjet-errors') === '1';
+  } catch (_) {}
+
+  var SJ_CONFIG = {
+    prefix: NEXUS_BASE + 'math/',
+    files: {
+      wasm: NEXUS_BASE + 'q9vx/sj.wasm.wasm',
+      all:  NEXUS_BASE + 'q9vx/sj.all.js',
+      sync: NEXUS_BASE + 'q9vx/sj.sync.js',
+    },
+    // Modern sites inspect Map/Set/DataView using Symbol.toStringTag.
+    // Strict rewriting makes those startup checks throw before WebSocket
+    // code is reached, so use the compatibility rewrite mode here.
+    flags: {
+      strictRewrites: false,
+      captureErrors: scramjetErrorCapture,
+      cleanErrors: !scramjetErrorCapture,
+      allowInvalidJs: true,
+      allowFailedIntercepts: true,
+    },
+    restrictPatterns: restrictPatterns,
+    adblockEnabled: adblockEnabled,
+  };
+
+  var packed  = window[SJLoad]();
+  var engine  = new packed[SJCtrl](SJ_CONFIG);
+  log('scramjet engine constructed', SJ_CONFIG);
+
+  var Mux        = window[BMux];
+  var connection = new Mux[BMuxCon](NEXUS_BASE + 'm4thx/worker.js');
+  log('bare-mux connection constructed', NEXUS_BASE + 'm4thx/worker.js');
+
+  function normalizeWispEndpoint(value) {
+    var fallback = (location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/wisp/';
+    if (!value) return fallback;
+    try {
+      var parsed = new URL(value, location.href);
+      // Koyeb terminates TLS at the public app hostname. A cached/older
+      // config.js may still say ws://, which browsers will not upgrade.
+      if (parsed.protocol === 'ws:' && /(^|\.)koyeb\.app$/i.test(parsed.hostname)) {
+        parsed.protocol = 'wss:';
+      }
+      return parsed.toString();
+    } catch (_) {
+      return value;
+    }
+  }
+
+  var configuredWisp = (typeof _CONFIG !== 'undefined' && _CONFIG.wispurl) || '';
+  var transportQuery = new URLSearchParams(location.search);
+  // Recover the flag if a static host rewrites /embed.html and drops its query.
+  var referrerQuery = null;
+  try {
+    if (document.referrer) {
+      var referrerUrl = new URL(document.referrer, location.href);
+      if (referrerUrl.origin === location.origin) referrerQuery = referrerUrl.searchParams;
+    }
+  } catch (_) {}
+  var useHttpBridge = transportQuery.get('httpbridge') === '1' ||
+    transportQuery.get('httpbridgews') === '1' ||
+    transportQuery.get('transport') === 'httpbridge' ||
+    transportQuery.get('transport') === 'hybrid' ||
+    (referrerQuery && (referrerQuery.get('httpbridge') === '1' ||
+      referrerQuery.get('httpbridgews') === '1' ||
+      referrerQuery.get('transport') === 'httpbridge' ||
+      referrerQuery.get('transport') === 'hybrid')) ||
+    (transportQuery.get('transport') !== 'wisp' && localStorage.getItem('nexus-httpbridge-setting') !== '0') ||
+    (typeof _CONFIG !== 'undefined' && _CONFIG.transport === 'httpbridge');
+  var useHttpBridgeWsOnly = useHttpBridge && (
+    transportQuery.get('httpbridgews') === '1' ||
+    transportQuery.get('transport') === 'hybrid' ||
+    (referrerQuery && (referrerQuery.get('httpbridgews') === '1' || referrerQuery.get('transport') === 'hybrid')) ||
+    ((!transportQuery.has('httpbridge') && !transportQuery.has('httpbridgews') && !transportQuery.has('transport')) &&
+      (!referrerQuery || (!referrerQuery.has('httpbridge') && !referrerQuery.has('httpbridgews') && !referrerQuery.has('transport'))) &&
+      localStorage.getItem('nexus-httpbridge-ws-setting') === '1') ||
+    (typeof _CONFIG !== 'undefined' && _CONFIG.transport === 'hybrid'));
+  if (useHttpBridge) {
+    if (!transportQuery.has('httpbridge') && !transportQuery.has('httpbridgews') && !transportQuery.has('transport')) {
+      try {
+        history.replaceState(null, '', location.pathname + '?httpbridge=1' + (useHttpBridgeWsOnly ? '&httpbridgews=1' : '') + location.hash);
+        transportQuery = new URLSearchParams(location.search);
+        log('restored httpbridge flag after URL rewrite', location.href);
+      } catch (_) {}
+    }
+  }
+  var store = {
+    wispurl: normalizeWispEndpoint(configuredWisp) + (socksEnabled ? '?socks=1' : ''),
+    bareurl: (typeof _CONFIG !== 'undefined' && _CONFIG.bareurl) ||
+      location.protocol + '//' + location.host + '/api/edge/',
+    bridgeurl: (typeof _CONFIG !== 'undefined' && _CONFIG.bridgeurl) ||
+      location.protocol + '//' + location.host + '/api/wsbridge/',
+  };
+  if (socksEnabled) store.bareurl += (store.bareurl.indexOf('?') >= 0 ? '&' : '?') + 'socks=1';
+  var bridgeTransportModule = location.origin + NEXUS_BASE + 'httpbridge/index.mjs';
+  // Keep transport fallback fixes from being hidden by a stale browser/CDN
+  // module cache after a static deployment.
+  var hybridTransportModule = location.origin + NEXUS_BASE + 'hybrid/index.mjs?build=svg-cdn-v1';
+  log('transport mode resolved', {
+    httpBridge: useHttpBridge,
+    httpBridgeWebSocketsOnly: useHttpBridgeWsOnly,
+    query: location.search,
+    controller: navigator.serviceWorker.controller ? navigator.serviceWorker.controller.scriptURL : null,
+    bridge: store.bridgeurl,
+  });
+  log('transport endpoints resolved', store);
+
+  var readyPromise = null;
+  var transportReady = false;
+  var frame = null;
+
+  function hostnameMatchesPattern(hostname, pattern) {
+    hostname = hostname.toLowerCase();
+    pattern = pattern.toLowerCase().trim();
+    if (!pattern) return false;
+
+    var base = pattern.replace(/^\*\./, '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+    return hostname === base || hostname.endsWith('.' + base);
+  }
+
+  function isRestrictionActive() {
+    return restrictPatterns.length > 0;
+  }
+
+  function isAllowedHostname(hostname) {
+    if (!isRestrictionActive()) return true;
+    for (var i = 0; i < restrictPatterns.length; i++) {
+      if (hostnameMatchesPattern(hostname, restrictPatterns[i])) return true;
+    }
+    return false;
+  }
+
+  function isUrlAllowed(url) {
+    try { return isAllowedHostname(new URL(url).hostname); } catch (e) { return false; }
+  }
+
+  // The domain root to fall back to when the very first requested URL
+  // violates the restriction and there's no "last good page" to return to
+  // yet. Derived from the first pattern, stripping any "*." wildcard prefix.
+  function restrictionHomeUrl() {
+    if (!isRestrictionActive()) return null;
+    var base = restrictPatterns[0].replace(/^\*\./, '');
+    return 'https://' + base + '/';
+  }
+
+  var lastAllowedUrl = null;
+  var restrictToastTimer = null;
+
+  function showRestrictToast(hostname) {
+    var el = document.getElementById('restrict-toast');
+    var textEl = document.getElementById('restrict-toast-text');
+    if (!el || !textEl) return;
+    textEl.innerHTML = 'Locked to <b>' + restrictPatterns.join(', ') + '</b>';
+    el.classList.add('show');
+    if (restrictToastTimer) clearTimeout(restrictToastTimer);
+    restrictToastTimer = setTimeout(function () {
+      el.classList.remove('show');
+    }, 3000);
+  }
+
+  function updateLockBanner() {
+    if (isRestrictionActive()) showRestrictToast();
+  }
+
+  updateLockBanner();
+  var restrictClose = document.getElementById('restrict-close');
+  if (restrictClose) restrictClose.addEventListener('click', function () {
+    var toast = document.getElementById('restrict-toast');
+    if (toast) toast.classList.remove('show');
+    if (restrictToastTimer) clearTimeout(restrictToastTimer);
+  });
+
+  // ── helpers ────────────────────────────────────────────────────────────────
+  function setStatus(text) {
+    var el = document.getElementById('status');
+    if (!el) return;
+    if (!text) { el.classList.add('hide'); return; }
+    el.classList.remove('hide');
+    el.querySelector('p').textContent = text;
+  }
+
+  function decodeUrlToken(value) {
+    if (value.indexOf('b64.') !== 0) return value;
+    try {
+      var encoded = value.slice(4).replace(/-/g, '+').replace(/_/g, '/');
+      while (encoded.length % 4) encoded += '=';
+      var binary = atob(encoded);
+      var bytes = new Uint8Array(binary.length);
+      for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return new TextDecoder().decode(bytes);
+    } catch (_) { return ''; }
+  }
+
+  function parseHashUrl() {
+    var raw = location.hash.slice(1).trim();
+    if (!raw) return '';
+    raw = decodeUrlToken(raw);
+    try { raw = decodeURIComponent(raw); } catch (e) {}
+    if (!/^https?:\/\//i.test(raw)) raw = 'https://' + raw.replace(/^\/+/, '');
+    try {
+      var u = new URL(raw);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
+      return u.href;
+    } catch (e) { return ''; }
+  }
+
+  var isSnappingBack = false;
+
+  function isLikelyResourceUrl(value) {
+    try {
+      var u = new URL(value);
+      var host = u.hostname.toLowerCase();
+      var path = u.pathname.toLowerCase();
+      if (/\.(m3u8|m3u|ts|m4s|mp4|webm|aac|mp3|jpg|jpeg|png|gif|webp|ico|svg|woff2?|ttf|css|js|json)(?:$|[?#])/.test(path)) return true;
+      if (host.endsWith('.twitchcdn.net') || host.endsWith('.ttvnw.net') || path === '/fp' || path.indexOf('/fp/') === 0) return true;
+    } catch (_) {}
+    return false;
+  }
+
+  function reportNav(realUrl, title) {
+    if (!realUrl) return;
+    if (isLikelyResourceUrl(realUrl)) {
+      log('ignoring resource URL navigation event', realUrl);
+      return;
+    }
+
+    if (isRestrictionActive() && !isUrlAllowed(realUrl)) {
+      // Don't report the blocked URL to the parent (keeps the address bar
+      // showing the last legitimate page instead of flashing the blocked one).
+      var hostname = '';
+      try { hostname = new URL(realUrl).hostname; } catch (e) {}
+      warn('navigation blocked by domain restriction', hostname, 'allowed:', restrictPatterns);
+      showRestrictToast(hostname);
+      window.parent.postMessage({
+        type: 'nexus-restricted',
+        attemptedUrl: realUrl,
+        allowed: restrictPatterns,
+      }, '*');
+
+      if (!isSnappingBack && frame) {
+        isSnappingBack = true;
+        var target = lastAllowedUrl || restrictionHomeUrl();
+        if (target) {
+          log('snapping back to last allowed url', target);
+          // Small delay so the toast is visible before the page swaps back
+          setTimeout(function () {
+            try { frame.go(target); } catch (e) { err('snap-back frame.go() threw', e); }
+            isSnappingBack = false;
+          }, 180);
+        } else {
+          isSnappingBack = false;
+        }
+      }
+      return;
+    }
+
+    lastAllowedUrl = realUrl;
+    log('reportNav -> parent', realUrl, title || '');
+    window.parent.postMessage({ type: 'nexus-nav', url: realUrl, title: title || '' }, '*');
+  }
+
+  // ── transport ──────────────────────────────────────────────────────────────
+  async function waitForTransport() {
+    if (transportReady) return;
+    log('waitForTransport() starting');
+    if (useHttpBridge) {
+      // Full HTTP mode must never fall through to Wisp. A WebSocket-blocking
+      // extension would make that fallback hang even though the HTTP bridge
+      // is the selected transport. Retry the bridge itself for startup races.
+      var lastBridgeError = null;
+      for (var bridgeAttempt = 0; bridgeAttempt < 8; bridgeAttempt++) {
+        try {
+          if (useHttpBridgeWsOnly) {
+            await connection[setT](hybridTransportModule, [store.wispurl, store.bridgeurl]);
+            log('transport set: Wisp + HTTP bridge for WebSockets', { wisp: store.wispurl, bridge: store.bridgeurl });
+          } else {
+            await connection[setT](bridgeTransportModule, [store.bridgeurl]);
+            log('transport set: HTTP bridge for pages and WebSockets', store.bridgeurl);
+          }
+          transportReady = true;
+          return;
+        } catch (bridgeError) {
+          lastBridgeError = bridgeError;
+          warn('HTTP transport setup attempt ' + (bridgeAttempt + 1) + '/8 failed', transportErrorDetails(bridgeError));
+          await new Promise(function (resolve) {
+            setTimeout(resolve, Math.min(1000, 150 + bridgeAttempt * 150));
+          });
+        }
+      }
+      err('HTTP transport unavailable; Wisp fallback disabled', transportErrorDetails(lastBridgeError));
+      throw new Error('HTTP transport unavailable: ' + transportErrorDetails(lastBridgeError));
+    }
+    for (var i = 0; i < 8; i++) {
+      try {
+        var o = {}; o[wispKey] = store.wispurl;
+        await connection[setT](NEXUS_BASE + 'e7px/index.mjs', [o]);
+        log('transport set: wisp (/e7px)', store.wispurl);
+        transportReady = true;
+        return;
+      } catch (e1) {
+        try {
+          var o2 = {}; o2[wispKey] = store.wispurl;
+          await connection[setT](NEXUS_BASE + 'l9cx/index.mjs', [o2]);
+          log('transport set: wisp fallback (/l9cx)', store.wispurl);
+          transportReady = true;
+          return;
+        } catch (e2) {
+          try {
+            await connection[setT](NEXUS_BASE + 'm4thx/index.mjs', [store.bareurl]);
+            log('transport set: bare (/m4thx)', store.bareurl);
+            transportReady = true;
+            return;
+          } catch (e3) {
+            if (i >= 7) {
+              try {
+                if (useHttpBridgeWsOnly) {
+                  await connection[setT](hybridTransportModule, [store.wispurl, store.bridgeurl]);
+                  log('transport set: Wisp + HTTP bridge fallback for WebSockets', { wisp: store.wispurl, bridge: store.bridgeurl });
+                } else {
+                  await connection[setT](bridgeTransportModule, [store.bridgeurl]);
+                  log('transport set: HTTP bridge fallback', store.bridgeurl);
+                }
+                transportReady = true;
+                return;
+              } catch (bridgeError) {
+                err('waitForTransport() exhausted all attempts: ' + JSON.stringify({
+                  e1: transportErrorDetails(e1),
+                  e2: transportErrorDetails(e2),
+                  e3: transportErrorDetails(e3),
+                  bridge: transportErrorDetails(bridgeError)
+                }));
+                throw new Error('No transport available');
+              }
+            }
+            warn('transport negotiation attempt ' + (i + 1) + '/8 failed, retrying', { e1: e1, e2: e2, e3: e3 });
+            await new Promise(function(r){ setTimeout(r, Math.min(800, 180 * (i + 1))); });
+          }
+        }
+      }
+    }
+  }
+
+  // Wait for the SW to explicitly confirm ("nexus$type: configAck") that it
+  // has processed a loadConfig message and _engine.config is actually set.
+  // engine.init()'s postMessage is fire-and-forget — awaiting it only means
+  // the message was SENT, not that the SW finished handling it. Without this
+  // handshake, a navigation right after engine.init() can race ahead of the
+  // SW's message handler and hit _engine.fetch() with config still unset,
+  // crashing with "Cannot read properties of undefined (reading 'prefix')".
+  function waitForConfigAck(timeoutMs) {
+    return new Promise(function (resolve) {
+      var settled = false;
+      log('config ack listener installing', {
+        timeoutMs: timeoutMs,
+        controller: navigator.serviceWorker.controller ? navigator.serviceWorker.controller.scriptURL : null,
+        state: navigator.serviceWorker.controller ? 'controlled' : 'not-controlled',
+      });
+      function onMsg(e) {
+        if (e.data && e.data.nexus$type === 'configAck') {
+          if (settled) return;
+          settled = true;
+          navigator.serviceWorker.removeEventListener('message', onMsg);
+          log('SW acked config', {
+            ready: !!e.data.ready,
+            source: e.source && e.source.id ? e.source.id : null,
+            controller: navigator.serviceWorker.controller ? navigator.serviceWorker.controller.scriptURL : null,
+          });
+          resolve(!!e.data.ready);
+        }
+      }
+      navigator.serviceWorker.addEventListener('message', onMsg);
+      log('config ack listener installed');
+      setTimeout(function () {
+        if (settled) return;
+        settled = true;
+        navigator.serviceWorker.removeEventListener('message', onMsg);
+        warn('SW config ack timed out after ' + timeoutMs + 'ms', {
+          controller: navigator.serviceWorker.controller ? navigator.serviceWorker.controller.scriptURL : null,
+        });
+        resolve(false);
+      }, timeoutMs);
+    });
+  }
+
+  async function sendConfigAndWait() {
+    await window.__nexusIdbReady;
+    log('sendConfigAndWait() -> engine.init()');
+    await engine.init();
+    log('engine.init() returned; waiting for SW config acknowledgment');
+    var ok = await waitForConfigAck(10000);
+    if (!ok) {
+      warn('config ack failed, retrying engine.init() once');
+      // One retry — covers a slow-starting SW thread
+      await engine.init();
+      ok = await waitForConfigAck(10000);
+    }
+    log('sendConfigAndWait() resolved', ok);
+    return ok;
+  }
+
+  async function ensureReady() {
+    if (readyPromise) return readyPromise;
+    log('ensureReady() starting SW registration');
+    readyPromise = (async function () {
+      // Register SW first and wait for it to be active
+      // Change this identifier whenever transport code changes. Service
+      // workers can otherwise keep an older 1k123.js alive after a Netlify
+      // deployment, making the browser appear to ignore the HTTP bridge.
+      var reg = await navigator.serviceWorker.register(NEXUS_BASE + '1k123.js?build=svg-cdn-v1', {
+        updateViaCache: 'none',
+        scope: NEXUS_BASE,
+      });
+      log('SW registered', reg.scope);
+      await navigator.serviceWorker.ready;
+      log('SW ready');
+
+      // Install the transport before sending config. The SW can issue an
+      // early proxied fetch during startup; doing this afterward caused the
+      // console error "there are no bare clients" and broke WebSockets.
+      await waitForTransport();
+
+      // Send config and wait for the SW's real acknowledgment — not just
+      // that engine.init() resolved, but that _engine.config is confirmed set.
+      var acked = await sendConfigAndWait();
+      if (!acked) {
+        warn('SW did not acknowledge config in time — proceeding anyway, first request may 503 and retry.');
+      }
+
+      // Re-send config whenever the SW restarts (e.g. after browser idle kill)
+      navigator.serviceWorker.addEventListener('controllerchange', function () {
+        log('SW controllerchange — re-sending config');
+        sendConfigAndWait();
+      });
+
+      log('ensureReady() complete');
+    })();
+    try { return await readyPromise; }
+    catch (e) { readyPromise = null; transportReady = false; throw e; }
+  }
+
+  // ── navigation ─────────────────────────────────────────────────────────────
+  async function loadUrl(url) {
+    log('loadUrl() called', url);
+    if (!url) {
+      setStatus('Enter a URL — e.g. /embed.html#https://example.com');
+      return;
+    }
+
+    if (isRestrictionActive() && !isUrlAllowed(url)) {
+      var hostname = '';
+      try { hostname = new URL(url).hostname; } catch (e) {}
+      warn('loadUrl() target blocked by restriction', hostname);
+      showRestrictToast(hostname);
+      window.parent.postMessage({
+        type: 'nexus-restricted',
+        attemptedUrl: url,
+        allowed: restrictPatterns,
+      }, '*');
+
+      if (!frame) {
+        // No page loaded yet at all — substitute the restricted domain's
+        // root and fall through to load THAT instead of the disallowed URL.
+        var home = restrictionHomeUrl();
+        if (home && isUrlAllowed(home)) {
+          log('no frame yet — substituting restriction home url', home);
+          url = home;
+        } else {
+          setStatus('Unable to open that page');
+          return;
+        }
+      } else {
+        // Already browsing — snap back to the last good page instead of
+        // ever navigating to the disallowed target. Bail out entirely so
+        // we don't fall through to frame.go(url) below with a bad URL.
+        var target = lastAllowedUrl || restrictionHomeUrl();
+        if (target && target !== url) {
+          log('already browsing — snapping to', target, 'instead of blocked', url);
+          try { frame.go(target); } catch (e) { err('blocked-nav snap-back frame.go() threw', e); }
+        }
+        return;
+      }
+    }
+
+    reportNav(url, '');
+    setStatus('Connecting…');
+
+    try {
+      await ensureReady();
+    } catch (e) {
+      err('ensureReady() rejected — transport setup failed', e);
+      setStatus('Transport failed — try refreshing');
+      window.parent.postMessage({ type: 'nexus-error', message: e.message }, '*');
+      return;
+    }
+
+    var container = document.getElementById('container');
+    container.innerHTML = '';
+
+    // Capture a snapshot of the frame reference for this navigation.
+    // The module-level `frame` variable gets reassigned on the next loadUrl()
+    // call — without this capture, any async callbacks (load, MutationObserver)
+    // that fire late would read the NEW frame and report its URL under the
+    // OLD site's identity, corrupting the address bar.
+    var thisFrame = engine[mkFrame]();
+    frame = thisFrame;
+    container.appendChild(thisFrame.frame);
+    log('new browsing frame created for', url);
+
+    // ── URL tracking via Scramjet's urlchange event ────────────────────────
+    thisFrame.addEventListener('urlchange', function (e) {
+      if (thisFrame !== frame) { log('ignoring urlchange from superseded frame'); return; }
+      var title = '';
+      try { title = thisFrame.frame.contentDocument.title || ''; } catch (_) {}
+      reportNav(e.url, title);
+    });
+
+    thisFrame.addEventListener('contextInit', function (e) {
+      if (thisFrame !== frame) { log('ignoring contextInit from superseded frame'); return; }
+      // contextInit also fires for nested documents used by sites for
+      // sign-in, APIs, and media. They are not top-level URL navigation and
+      // must not trigger the embed restriction or replace the address bar.
+      log('ignoring nested contextInit navigation event');
+    });
+
+    thisFrame.frame.addEventListener('load', function () {
+      if (thisFrame !== frame) { log('ignoring load event from superseded frame'); return; }
+      try {
+        watchProxiedDocument(thisFrame.frame, url);
+        var realUrl = engine.decodeUrl(thisFrame.frame.contentWindow.location.href);
+        var title   = thisFrame.frame.contentDocument.title || '';
+        if (realUrl) reportNav(realUrl, title);
+
+        var titleEl = thisFrame.frame.contentDocument.querySelector('title');
+        if (titleEl) {
+          var mo = new MutationObserver(function () {
+            if (thisFrame !== frame) { log('disconnecting stale title observer'); mo.disconnect(); return; }
+            try {
+              var u = engine.decodeUrl(thisFrame.frame.contentWindow.location.href);
+              reportNav(u, thisFrame.frame.contentDocument.title || '');
+            } catch (_) {}
+          });
+          mo.observe(titleEl, { childList: true, characterData: true, subtree: true });
+        }
+      } catch (e) { err('frame load handler threw', e); }
+    });
+
+    thisFrame.go(url);
+    setTimeout(function () { setStatus(''); }, 600);
+  }
+
+  function loadFromHash() {
+    loadUrl(parseHashUrl());
+  }
+
+  // Dynamically apply a new restriction (from the "Apply" button in the
+  // parent UI) without reloading the whole embed page — keeps the SW and
+  // transport warm. If the page currently loaded no longer satisfies the
+  // new restriction, it's no longer safe to use as a snap-back target, so
+  // clear it first and let the enforcement gate fall back to the new
+  // restriction's own home URL instead of looping back to the stale page.
+  function applyRestriction(patternsList) {
+    restrictPatterns = patternsList || [];
+    log('applyRestriction()', restrictPatterns);
+    updateLockBanner();
+
+    // Re-propagate into the Scramjet config so popup/window.open blocking
+    // (enforced inside the proxied page's own runtime, via config.$W read
+    // by the patched window.open hook) picks up the change too — not just
+    // in-frame navigation. SJ_CONFIG.restrictPatterns was only merged into
+    // the global config once, at construction; simply reassigning the
+    // outer variable here does not retroactively update that. Constructing
+    // a fresh controller with the updated config and calling init() on it
+    // re-runs that merge and re-notifies the SW, without disturbing the
+    // existing engine/frame/transport, which are separate objects.
+    try {
+      SJ_CONFIG.restrictPatterns = restrictPatterns;
+      var refreshCtrl = new packed[SJCtrl](SJ_CONFIG);
+      refreshCtrl.init().catch(function () {});
+    } catch (e) {}
+
+    if (!isRestrictionActive()) return;
+    if (lastAllowedUrl && !isUrlAllowed(lastAllowedUrl)) {
+      var staleUrl = lastAllowedUrl;
+      lastAllowedUrl = null;
+      reportNav(staleUrl, '');
+    }
+  }
+
+  // ── commands from parent ───────────────────────────────────────────────────
+  window.addEventListener('message', function (e) {
+    if (!e.data || e.data.type !== 'nexus-cmd') return;
+    log('received cmd from parent', e.data.cmd, e.data);
+    if (e.data.cmd === 'back') {
+      try { if (frame) frame.frame.contentWindow.history.back(); } catch (e2) { err('back cmd threw', e2); }
+    } else if (e.data.cmd === 'forward') {
+      try { if (frame) frame.frame.contentWindow.history.forward(); } catch (e2) { err('forward cmd threw', e2); }
+    } else if (e.data.cmd === 'audioToggle') {
+      try {
+        var media = frame && frame.frame.contentDocument ? frame.frame.contentDocument.querySelectorAll('audio,video') : [];
+        var shouldMute = Array.from(media).some(function (el) { return !el.muted; });
+        Array.from(media).forEach(function (el) { el.muted = shouldMute; });
+      } catch (e2) { err('audio toggle cmd threw', e2); }
+    } else if (e.data.cmd === 'reload') {
+      try { if (frame) frame.frame.contentWindow.location.reload(); } catch (e2) { err('reload cmd threw', e2); }
+    } else if (e.data.cmd === 'go') {
+      loadUrl(e.data.url);
+    } else if (e.data.cmd === 'setRestrict') {
+      applyRestriction(e.data.patterns);
+    } else if (e.data.cmd === 'setClean') {
+      cleanEnabled = !!e.data.enabled || !!String(e.data.selector || '').trim();
+      cleanSelector = String(e.data.selector || '').trim();
+      watchProxiedDocument(frame && frame.frame, lastAllowedUrl);
+      log('page cleanup updated', { enabled: cleanEnabled, selector: cleanSelector });
+    } else if (e.data.cmd === 'setAdblock') {
+      adblockEnabled = e.data.enabled !== false;
+      blockAdsInDocument(cleanFrameDocument);
+      log('ad blocker updated', adblockEnabled);
+    }
+  });
+
+  window.addEventListener('hashchange', loadFromHash);
+  window.addEventListener('load', loadFromHash);
+})();
+</script>
+</body>
+</html>
