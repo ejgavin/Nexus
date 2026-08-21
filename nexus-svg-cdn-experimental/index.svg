@@ -65,7 +65,8 @@
               body.appendChild(document.importNode(node, true));
             });
             return headScripts.reduce((promise, script) => promise.then(() => runScript(script, staticIndex.href)), Promise.resolve())
-              .then(() => bodyScripts.reduce((promise, script) => promise.then(() => runScript(script, staticIndex.href)), Promise.resolve()));
+              .then(() => bodyScripts.reduce((promise, script) => promise.then(() => runScript(script, staticIndex.href)), Promise.resolve()))
+              .then(() => root.remove());
           }).catch(error => {
             console.error('[Nexus:svg] failed to load the full Nexus UI', error);
             root.innerHTML = '';
